@@ -5,14 +5,17 @@
 // instead of masking each other. A healthy JVM should sound like a calm heartbeat with a
 // melody over it; a struggling one should sound tense.
 //
-//   heap used %      continuous sine drone, 180-700Hz          low-mid, always present
+//   heap used %      continuous sine drone, 90-260Hz           low, a bed under everything
 //   cpu load         tremolo rate and filter cutoff on drone   shapes the drone, no new voice
 //   allocation rate  hi-hat tempo                              high and short
 //   gc pause         kick, sine sweep 140->40Hz                sub-bass transient, the heartbeat
 //   long gc          filtered noise burst                      broadband alarm
-//   contention       detuned square, pitch by thread           mid, deliberately dissonant
+//   contention       detuned square from 330Hz, pitch by thread mid, deliberately dissonant
 //   live threads     pentatonic notes                          mid-high, pleasant when healthy
 //   leak             slow dissonant swell                      a collection that reclaims nothing
+//
+// The drone ducks briefly whenever a collection or a contention event fires, so those punch
+// through instead of competing with a tone that never stops.
 //
 // Parked threads make no sound on purpose: a parked thread is usually just an idle pool
 // thread waiting for work, so sonifying it would be alarming about nothing.
@@ -22,6 +25,17 @@ window.SonifyAudio = (function () {
   var PENTATONIC = [0, 3, 5, 7, 10];
   var ROOT_HZ = 220;
   var LONG_GC_MS = 100;
+
+  // Registers are kept apart on purpose. The drone is a bed that everything else sits on top
+  // of, so it lives low; contention and the melody own the midrange where the ear picks out
+  // detail. An earlier version ran the drone from 180Hz to 700Hz, which put it straight on top
+  // of both and masked them. Its floor stays near 90Hz because laptop speakers roll off below
+  // that and a drone nobody can hear is not a reading.
+  var DRONE_LOW_HZ = 90;
+  var DRONE_HIGH_HZ = 260;
+  var DRONE_GAIN = 0.10;
+  var CONTENTION_BASE_HZ = 330;
+  var DUCK_DEPTH = 0.45;
   var SCHEDULE_AHEAD = 0.12;
   var SCHEDULER_MS = 25;
 
@@ -123,14 +137,14 @@ window.SonifyAudio = (function () {
       droneFilter.Q.value = 1;
 
       droneGain = ctx.createGain();
-      droneGain.gain.value = 0.16;
+      droneGain.gain.value = DRONE_GAIN;
 
       // Tremolo: a slow pulse when the JVM is calm, faster and deeper as CPU climbs.
       tremolo = ctx.createOscillator();
       tremolo.type = 'sine';
       tremolo.frequency.value = 0.6;
       tremoloDepth = ctx.createGain();
-      tremoloDepth.gain.value = 0.02;
+      tremoloDepth.gain.value = 0.015;
       tremolo.connect(tremoloDepth);
       tremoloDepth.connect(droneGain.gain);
 
@@ -156,14 +170,14 @@ window.SonifyAudio = (function () {
       var now = ctx.currentTime;
       var ramp = 0.12;
 
-      // Heap drives pitch across a bit more than two octaves.
-      var hz = 180 + vitals.heapRatio * (700 - 180);
+      // Heap drives pitch across about an octave and a half, low enough to stay out of the way.
+      var hz = DRONE_LOW_HZ + vitals.heapRatio * (DRONE_HIGH_HZ - DRONE_LOW_HZ);
       drone.frequency.setTargetAtTime(hz, now, ramp);
 
       // CPU opens the filter and quickens the pulse, so load is audible as brightness.
       droneFilter.frequency.setTargetAtTime(600 + vitals.cpu * 3400, now, ramp);
       tremolo.frequency.setTargetAtTime(0.6 + vitals.cpu * 7, now, ramp);
-      tremoloDepth.gain.setTargetAtTime(0.02 + vitals.cpu * 0.06, now, ramp);
+      tremoloDepth.gain.setTargetAtTime(0.015 + vitals.cpu * 0.04, now, ramp);
     }
 
     /** Lookahead scheduler for the rhythmic voices. */
@@ -201,12 +215,29 @@ window.SonifyAudio = (function () {
         while (nextNoteTime < horizon) {
           var degree = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
           var octave = vitals.threads > 60 ? 2 : 1;
-          note(nextNoteTime, ROOT_HZ * Math.pow(2, (degree + 12 * octave) / 12), 0.07, 0.45);
+          note(nextNoteTime, ROOT_HZ * Math.pow(2, (degree + 12 * octave) / 12), 0.10, 0.45);
           nextNoteTime += 1.1 + Math.random() * 1.6;
         }
       } else {
         nextNoteTime = ctx.currentTime + 1.5;
       }
+    }
+
+    /**
+     * Dips the drone for a moment so a transient is heard rather than competing with it.
+     *
+     * <p>The same trick a mixing engineer uses: the continuous bed gets out of the way of the
+     * events that matter, then comes straight back.
+     */
+    function duck(when, depth, length) {
+      if (!droneGain) {
+        return;
+      }
+      var floor = Math.max(0.005, DRONE_GAIN * (1 - depth));
+      droneGain.gain.cancelScheduledValues(when);
+      droneGain.gain.setValueAtTime(droneGain.gain.value, when);
+      droneGain.gain.exponentialRampToValueAtTime(floor, when + 0.02);
+      droneGain.gain.exponentialRampToValueAtTime(DRONE_GAIN, when + length);
     }
 
     function hat(when, gain) {
@@ -269,6 +300,7 @@ window.SonifyAudio = (function () {
       envelope.connect(master);
       osc.start(when);
       osc.stop(when + length + 0.02);
+      duck(when, DUCK_DEPTH * weight, length + 0.15);
 
       if (pause > LONG_GC_MS) {
         alarm(when, Math.min(1, pause / 400));
@@ -308,7 +340,7 @@ window.SonifyAudio = (function () {
         threadPitch.set(event.thread, threadPitch.size);
       }
       var index = threadPitch.get(event.thread) % 12;
-      var hz = 160 * Math.pow(2, index / 12);
+      var hz = CONTENTION_BASE_HZ * Math.pow(2, index / 12);
       var when = ctx.currentTime + 0.01;
       var weight = Math.min(1, event.durationMs / 200);
       var length = 0.16 + weight * 0.3;
@@ -321,11 +353,11 @@ window.SonifyAudio = (function () {
 
         var lowpass = ctx.createBiquadFilter();
         lowpass.type = 'lowpass';
-        lowpass.frequency.value = 1400;
+        lowpass.frequency.value = 2200;
 
         var envelope = ctx.createGain();
         envelope.gain.setValueAtTime(0.0001, when);
-        envelope.gain.exponentialRampToValueAtTime(0.07 + weight * 0.08, when + 0.03);
+        envelope.gain.exponentialRampToValueAtTime(0.11 + weight * 0.12, when + 0.03);
         envelope.gain.exponentialRampToValueAtTime(0.0001, when + length);
 
         osc.connect(lowpass);
@@ -334,6 +366,7 @@ window.SonifyAudio = (function () {
         osc.start(when);
         osc.stop(when + length + 0.02);
       });
+      duck(when, DUCK_DEPTH, length + 0.1);
     }
 
     /** A collection that reclaimed almost nothing while the heap is high: the leak sound. */
@@ -405,6 +438,7 @@ window.SonifyAudio = (function () {
         sampleRate: ctx ? ctx.sampleRate : 0,
         heapRatio: vitals.heapRatio,
         droneHz: drone ? drone.frequency.value : 0,
+        droneGain: droneGain ? droneGain.gain.value : 0,
         filterHz: droneFilter ? droneFilter.frequency.value : 0,
         tremoloHz: tremolo ? tremolo.frequency.value : 0,
         allocMBps: vitals.allocMBps,
