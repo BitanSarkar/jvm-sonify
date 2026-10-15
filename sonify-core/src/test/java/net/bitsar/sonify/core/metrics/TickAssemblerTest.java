@@ -29,7 +29,7 @@ class TickAssemblerTest {
     }
 
     private static JvmVitals.Sample reading(Double cpu) {
-        return new JvmVitals.Sample(400L * MB, 1024L * MB, 4096L * MB, 42, cpu, 0.6d);
+        return new JvmVitals.Sample(400L * MB, 1024L * MB, 4096L * MB, 42, cpu, 0.6d, 2, 9);
     }
 
     @Test
@@ -50,6 +50,8 @@ class TickAssemblerTest {
         assertEquals(0.6d, tick.machineCpu());
         assertEquals(1, tick.contended());
         assertEquals(1, tick.threadSlices().size());
+        assertEquals(2, tick.blocked(), "instantaneous blocked count comes from the thread bean");
+        assertEquals(9, tick.waiting(), "instantaneous waiting count comes from the thread bean");
         assertEquals(ThreadSlice.CONTENDED, tick.threadSlices().get(0).state());
         assertEquals(22 * MB, tick.threadSlices().get(0).allocBytes());
     }
@@ -89,7 +91,7 @@ class TickAssemblerTest {
     @Test
     @DisplayName("an unavailable CPU reading stays null all the way through")
     void missingCpuStaysNull() {
-        vitals.set(new JvmVitals.Sample(1L, 2L, 3L, 4, null, null));
+        vitals.set(new JvmVitals.Sample(1L, 2L, 3L, 4, null, null, 0, 0));
 
         TickEvent tick = assembler().assemble();
 
@@ -103,6 +105,21 @@ class TickAssemblerTest {
         allocation.set(new AllocationSampler.Sample(false, 0L, Map.of()));
 
         assertEquals(0d, assembler().assemble().allocMBps());
+    }
+
+    @Test
+    @DisplayName("a thread waiting on a socket is reported as waiting, ahead of allocators")
+    void ioWaitRanksAboveAllocation() {
+        TickAssembler assembler = assembler();
+        accumulator.recordIoWait("http-nio-8080-exec-1");
+        allocation.set(new AllocationSampler.Sample(true, 0L, Map.of("busy-allocator", 900 * MB)));
+
+        TickEvent tick = assembler.assemble();
+
+        assertEquals(1, tick.ioWait());
+        assertEquals("http-nio-8080-exec-1", tick.threadSlices().get(0).name());
+        assertEquals(ThreadSlice.WAITING, tick.threadSlices().get(0).state());
+        assertEquals("busy-allocator", tick.threadSlices().get(1).name());
     }
 
     @Test

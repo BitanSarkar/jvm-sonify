@@ -20,8 +20,8 @@ import net.bitsar.sonify.core.metrics.MetricsAccumulator;
 /**
  * Owns the single in-process {@link RecordingStream} for the whole JVM.
  *
- * <p>Only subscribes to what nothing else can measure: collection pauses, monitor contention and
- * parking. Heap, CPU, thread count and allocation all come from the platform MXBeans, exactly and
+ * <p>Only subscribes to what nothing else can measure: collection pauses, monitor contention,
+ * parking and time spent blocked in socket reads. Heap, CPU, thread count and allocation all come from the platform MXBeans, exactly and
  * without Flight Recorder's batching delay.
  *
  * <p>One stream serves every connected browser. Stack traces are switched off on all
@@ -72,11 +72,18 @@ public final class JfrEventPump implements AutoCloseable {
             starting.enable("jdk.ThreadPark")
                     .withThreshold(config.parkThreshold())
                     .withoutStackTrace();
+            // How waiting on a database, a cache or a third-party API actually appears. Without
+            // this a stalled application looks and sounds idle, because a thread blocked in a
+            // socket read is neither parked nor contended nor allocating.
+            starting.enable("jdk.SocketRead")
+                    .withThreshold(config.ioWaitThreshold())
+                    .withoutStackTrace();
 
             starting.onEvent("jdk.GCHeapSummary", this::onHeapSummary);
             starting.onEvent("jdk.GarbageCollection", this::onGarbageCollection);
             starting.onEvent("jdk.JavaMonitorEnter", this::onMonitorEnter);
             starting.onEvent("jdk.ThreadPark", this::onThreadPark);
+            starting.onEvent("jdk.SocketRead", this::onSocketRead);
 
             starting.startAsync();
             this.stream = starting;
@@ -187,6 +194,14 @@ public final class JfrEventPump implements AutoCloseable {
             return startTime == null ? System.currentTimeMillis() : startTime.toEpochMilli();
         } catch (Throwable unavailable) {
             return System.currentTimeMillis();
+        }
+    }
+
+    private void onSocketRead(RecordedEvent event) {
+        try {
+            accumulator.recordIoWait(threadName(event));
+        } catch (Throwable ignored) {
+            // Drop this one event.
         }
     }
 

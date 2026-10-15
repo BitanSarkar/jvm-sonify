@@ -12,13 +12,18 @@
 //   long gc          filtered noise burst                      broadband alarm
 //   contention       detuned square from 330Hz, pitch by thread mid, deliberately dissonant
 //   live threads     pentatonic notes                          mid-high, pleasant when healthy
+//   threads waiting  breath pad, filtered noise                low-mid, swells as waits build
 //   leak             slow dissonant swell                      a collection that reclaims nothing
 //
 // The drone ducks briefly whenever a collection or a contention event fires, so those punch
 // through instead of competing with a tone that never stops.
 //
-// Parked threads make no sound on purpose: a parked thread is usually just an idle pool
-// thread waiting for work, so sonifying it would be alarming about nothing.
+// The breath pad is what makes a stalled application audible. A pool that has run dry, a slow
+// third-party API or an event loop held by a blocking call all allocate nothing, collect nothing
+// and contend over nothing: without a voice for waiting they are simply silent, which is the one
+// thing a monitor must never be. It is noise rather than a tone so it cannot be confused with
+// the heap drone, and it breathes faster as more threads pile up, like respiration on a bedside
+// monitor.
 window.SonifyAudio = (function () {
   'use strict';
 
@@ -36,6 +41,10 @@ window.SonifyAudio = (function () {
   var DRONE_GAIN = 0.10;
   var CONTENTION_BASE_HZ = 330;
   var DUCK_DEPTH = 0.45;
+
+  // Waiting threads are counted against this before the pad reaches full depth.
+  var BREATH_FULL_SCALE = 24;
+  var BREATH_MAX_GAIN = 0.16;
   var SCHEDULE_AHEAD = 0.12;
   var SCHEDULER_MS = 25;
 
@@ -54,6 +63,12 @@ window.SonifyAudio = (function () {
     var hatBus = null;
     var voiceBus = null;
 
+    var breathSource = null;
+    var breathFilter = null;
+    var breathGain = null;
+    var breathRate = null;
+    var breathDepth = null;
+
     var scheduler = null;
     var nextHatTime = 0;
     var nextNoteTime = 0;
@@ -62,7 +77,7 @@ window.SonifyAudio = (function () {
     var volume = 0.7;
 
     // Latest readings, written by the stream and read by the scheduler.
-    var vitals = { heapRatio: 0, allocMBps: 0, cpu: 0, threads: 1, contended: 0 };
+    var vitals = { heapRatio: 0, allocMBps: 0, cpu: 0, threads: 1, contended: 0, waiting: 0 };
 
     function running() {
       return ctx !== null && ctx.state === 'running';
@@ -109,6 +124,7 @@ window.SonifyAudio = (function () {
 
       noise = buildNoiseBuffer(ctx);
       buildDrone();
+      buildBreath();
 
       nextHatTime = ctx.currentTime;
       nextNoteTime = ctx.currentTime;
@@ -155,6 +171,41 @@ window.SonifyAudio = (function () {
       tremolo.start();
     }
 
+    /**
+     * The sound of threads that are waiting rather than working.
+     *
+     * <p>Band-passed noise with a slow swell, so it reads as breathing rather than as a tone.
+     * Silent when nothing is waiting, which is most of the time.
+     */
+    function buildBreath() {
+      breathSource = ctx.createBufferSource();
+      breathSource.buffer = noise;
+      breathSource.loop = true;
+
+      breathFilter = ctx.createBiquadFilter();
+      breathFilter.type = 'bandpass';
+      breathFilter.frequency.value = 520;
+      breathFilter.Q.value = 0.9;
+
+      breathGain = ctx.createGain();
+      breathGain.gain.value = 0;
+
+      // The swell itself: a slow oscillator opening and closing the filter.
+      breathRate = ctx.createOscillator();
+      breathRate.type = 'sine';
+      breathRate.frequency.value = 0.22;
+      breathDepth = ctx.createGain();
+      breathDepth.gain.value = 260;
+      breathRate.connect(breathDepth);
+      breathDepth.connect(breathFilter.frequency);
+
+      breathSource.connect(breathFilter);
+      breathFilter.connect(breathGain);
+      breathGain.connect(master);
+      breathSource.start();
+      breathRate.start();
+    }
+
     /** Called on every tick so the continuous voices track the vitals. */
     function update(tick) {
       var max = tick.heapMax > 0 ? tick.heapMax : tick.heapCommitted;
@@ -163,6 +214,11 @@ window.SonifyAudio = (function () {
       vitals.cpu = tick.cpu === null || tick.cpu === undefined ? 0 : tick.cpu;
       vitals.threads = tick.threads;
       vitals.contended = tick.contended;
+      // Supplied by the page, which measures the rise above the resting parked level rather
+      // than the absolute count, so an idle pool does not hum.
+      vitals.waiting = tick.waitingLevel === undefined
+          ? (tick.ioWait || 0)
+          : tick.waitingLevel;
 
       if (!running()) {
         return;
@@ -178,6 +234,12 @@ window.SonifyAudio = (function () {
       droneFilter.frequency.setTargetAtTime(600 + vitals.cpu * 3400, now, ramp);
       tremolo.frequency.setTargetAtTime(0.6 + vitals.cpu * 7, now, ramp);
       tremoloDepth.gain.setTargetAtTime(0.015 + vitals.cpu * 0.04, now, ramp);
+
+      // More threads waiting means a louder pad breathing faster, the way respiration climbs.
+      var load = Math.min(1, vitals.waiting / BREATH_FULL_SCALE);
+      breathGain.gain.setTargetAtTime(load * BREATH_MAX_GAIN, now, 0.35);
+      breathRate.frequency.setTargetAtTime(0.22 + load * 0.75, now, 0.35);
+      breathFilter.frequency.setTargetAtTime(420 + load * 700, now, 0.35);
     }
 
     /** Lookahead scheduler for the rhythmic voices. */
@@ -442,6 +504,9 @@ window.SonifyAudio = (function () {
         filterHz: droneFilter ? droneFilter.frequency.value : 0,
         tremoloHz: tremolo ? tremolo.frequency.value : 0,
         allocMBps: vitals.allocMBps,
+        waiting: vitals.waiting,
+        breathGain: breathGain ? breathGain.gain.value : 0,
+        breathRateHz: breathRate ? breathRate.frequency.value : 0,
         threadVoices: threadPitch.size
       };
     }

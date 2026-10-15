@@ -23,7 +23,9 @@
     <module>sonify-core</module>
     <module>sonify-spring-boot-autoconfigure</module>
     <module>sonify-spring-boot-starter</module>
+    <module>sonify-scenarios</module>
     <module>sonify-demo</module>
+    <module>sonify-demo-reactive</module>
   </modules>
 
   <dependencyManagement>
@@ -48,6 +50,11 @@
       <dependency>
         <groupId>net.bitsar</groupId>
         <artifactId>sonify-spring-boot-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.bitsar</groupId>
+        <artifactId>sonify-scenarios</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

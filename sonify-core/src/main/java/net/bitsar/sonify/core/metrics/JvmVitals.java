@@ -3,6 +3,7 @@ package net.bitsar.sonify.core.metrics;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryUsage;
+import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.time.Duration;
 import java.util.function.LongSupplier;
@@ -17,6 +18,14 @@ import java.util.function.LongSupplier;
  *
  * <p>Sampling all of these costs about 1.4 microseconds, so it is affordable on every tick. CPU
  * load is reported as null when the running JVM cannot supply it, rather than as a misleading zero.
+ *
+ * <p>Thread states are sampled here too, and that is deliberate. Flight Recorder reports a wait
+ * only once it has finished, because the event carries a duration; a thread that is stuck right
+ * now has emitted nothing at all. For the failure modes that matter most, a drained connection
+ * pool or a client with no read timeout, every thread is stuck and nothing is ever emitted, so an
+ * event-driven view shows an idle application. Asking the thread bean how many threads are
+ * blocked or waiting at this instant costs about 44 microseconds and answers truthfully whether
+ * or not anybody is ever going to get unstuck.
  *
  * <p>Not thread safe: one instance belongs to one tick thread.
  */
@@ -68,12 +77,50 @@ public final class JvmVitals {
     public Sample sample() {
         MemoryUsage heap = memory.getHeapMemoryUsage();
         long now = nanoClock.getAsLong();
+        ThreadStates states = sampleThreadStates();
         return new Sample(heap.getUsed(),
                 heap.getCommitted(),
                 heap.getMax(),
                 threads.getThreadCount(),
                 processCpu.update(extendedOs == null ? -1d : extendedOs.getProcessCpuLoad(), now),
-                machineCpu.update(extendedOs == null ? -1d : extendedOs.getCpuLoad(), now));
+                machineCpu.update(extendedOs == null ? -1d : extendedOs.getCpuLoad(), now),
+                states.blocked(),
+                states.waiting());
+    }
+
+    /**
+     * Counts threads that are stuck right now.
+     *
+     * <p>BLOCKED means waiting to enter a monitor. WAITING and TIMED_WAITING cover everything
+     * else that is parked or sleeping, which includes both a request waiting for a connection and
+     * an idle pool thread with nothing to do; telling those apart is left to the consumer, which
+     * can compare against the resting level.
+     */
+    private ThreadStates sampleThreadStates() {
+        try {
+            long[] ids = threads.getAllThreadIds();
+            ThreadInfo[] infos = threads.getThreadInfo(ids, 0);
+            int blocked = 0;
+            int waiting = 0;
+            for (ThreadInfo info : infos) {
+                if (info == null) {
+                    continue;
+                }
+                switch (info.getThreadState()) {
+                    case BLOCKED -> blocked++;
+                    case WAITING, TIMED_WAITING -> waiting++;
+                    default -> {
+                        // RUNNABLE, NEW and TERMINATED need no counting.
+                    }
+                }
+            }
+            return new ThreadStates(blocked, waiting);
+        } catch (Throwable unavailable) {
+            return new ThreadStates(0, 0);
+        }
+    }
+
+    private record ThreadStates(int blocked, int waiting) {
     }
 
     /** True when this JVM can report CPU load at all. */
@@ -87,7 +134,9 @@ public final class JvmVitals {
                          long heapMax,
                          int threadCount,
                          Double processCpu,
-                         Double machineCpu) {
+                         Double machineCpu,
+                         int blockedThreads,
+                         int waitingThreads) {
     }
 
     /**

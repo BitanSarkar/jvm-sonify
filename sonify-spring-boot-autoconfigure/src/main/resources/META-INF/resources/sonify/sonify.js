@@ -8,6 +8,7 @@
   var MAX_LOG = 20;
   var THREAD_DECAY = 0.82;
   var LEAK_COOLDOWN_MS = 4000;
+  var PARKED_FLOOR_WINDOW = 300;
 
   var state = {
     ticks: [],
@@ -25,6 +26,7 @@
   var recorder = null;
   var recordedChunks = [];
   var counters = { ticks: 0, gc: 0, contention: 0 };
+  var parkedHistory = [];
 
   var el = {};
 
@@ -60,8 +62,35 @@
 
   // ---- rolling state -------------------------------------------------------
 
+  /**
+   * How many threads are waiting on something, as opposed to idling.
+   *
+   * <p>An application at rest still has parked threads: pool workers with nothing to do park
+   * exactly like a request waiting for a connection. What distinguishes trouble is the rise
+   * above that resting level, so the floor is taken as the lowest parked count seen recently
+   * and only the excess counts. Threads blocked in a socket read always count, since a thread
+   * in a read is never merely idle.
+   */
+  function waitingLevel(tick) {
+    // The instantaneous thread-state count when available, since it stays truthful when nothing
+    // ever recovers; the event-based parked count is the fallback for older payloads.
+    var parked = tick.waiting === undefined ? (tick.parked || 0) : tick.waiting;
+    parkedHistory.push(parked);
+    if (parkedHistory.length > PARKED_FLOOR_WINDOW) {
+      parkedHistory.shift();
+    }
+    var floor = parkedHistory[0];
+    for (var i = 1; i < parkedHistory.length; i++) {
+      if (parkedHistory[i] < floor) {
+        floor = parkedHistory[i];
+      }
+    }
+    return (tick.ioWait || 0) + (tick.blocked || 0) + Math.max(0, parked - floor) * 0.8;
+  }
+
   function onTick(tick) {
     counters.ticks++;
+    tick.waitingLevel = waitingLevel(tick);
     state.ticks.push(tick);
     if (state.ticks.length > MAX_TICKS) {
       state.ticks.shift();
@@ -80,16 +109,18 @@
     threads.forEach(function (row) {
       row.score *= THREAD_DECAY;
       row.contended = false;
+      row.waiting = false;
     });
 
     (tick.threadDetail || []).forEach(function (detail) {
       var row = threads.get(detail.name);
       if (!row) {
-        row = { name: detail.name, score: 0, contended: false, lastSeen: 0 };
+        row = { name: detail.name, score: 0, contended: false, waiting: false, lastSeen: 0 };
         threads.set(detail.name, row);
       }
-      row.score += 1 + mb(detail.allocBytes) + detail.blocks * 40;
+      row.score += 1 + mb(detail.allocBytes) + detail.blocks * 40 + (detail.io || 0) * 25;
       row.contended = detail.blocks > 0;
+      row.waiting = (detail.io || 0) > 0;
       row.lastSeen = tick.t;
     });
 
@@ -102,6 +133,9 @@
     state.threadRows = Array.from(threads.values()).sort(function (a, b) {
       if (a.contended !== b.contended) {
         return a.contended ? -1 : 1;
+      }
+      if (a.waiting !== b.waiting) {
+        return a.waiting ? -1 : 1;
       }
       return b.score - a.score;
     });
@@ -188,6 +222,9 @@
     el.statThreads.textContent = tick.threads;
     el.statContended.textContent = tick.contended;
     el.statContended.className = 'stat__value' + (tick.contended > 0 ? ' stat__value--bad' : '');
+    var stuck = Math.round(tick.waitingLevel || 0);
+    el.statIoWait.textContent = stuck;
+    el.statIoWait.className = 'stat__value' + (stuck > 0 ? ' stat__value--waiting' : '');
     el.statParked.textContent = tick.parked;
   }
 
@@ -337,6 +374,7 @@
       statMachine: byId('stat-machine'),
       statThreads: byId('stat-threads'),
       statContended: byId('stat-contended'),
+      statIoWait: byId('stat-iowait'),
       statParked: byId('stat-parked')
     };
 

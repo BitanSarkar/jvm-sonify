@@ -52,6 +52,10 @@
       <span class="stat__value" id="stat-contended">&mdash;</span>
     </div>
     <div class="stat">
+      <span class="stat__label">threads stuck</span>
+      <span class="stat__value" id="stat-iowait">&mdash;</span>
+    </div>
+    <div class="stat">
       <span class="stat__label">parked</span>
       <span class="stat__value" id="stat-parked">&mdash;</span>
     </div>
@@ -70,6 +74,7 @@
     <span><i class="swatch swatch--alloc"></i>allocation</span>
     <span><i class="swatch swatch--running"></i>running</span>
     <span><i class="swatch swatch--contended"></i>contended</span>
+    <span><i class="swatch swatch--waiting"></i>waiting on i/o</span>
     <span><i class="swatch swatch--parked"></i>parked</span>
   </footer>
 

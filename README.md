@@ -112,7 +112,7 @@ Each vital owns one timbre in its own register, so they layer instead of masking
 
 | Vital | Source | Sound | Register |
 | --- | --- | --- | --- |
-| Heap used % | MXBean | continuous sine drone, 180→700 Hz | low-mid, always present |
+| Heap used % | MXBean | continuous sine drone, 90→260 Hz | low, a bed under everything |
 | CPU load | MXBean | tremolo rate and filter cutoff **on the drone** | shapes the drone, adds no voice |
 | Allocation rate | MXBean | hi-hat tempo, log-scaled | high and short |
 | GC pause | JFR | kick, sine sweep 140→40 Hz, louder with longer pauses | sub-bass transient — the heartbeat |
@@ -120,12 +120,20 @@ Each vital owns one timbre in its own register, so they layer instead of masking
 | Lock contention | JFR | detuned square, pitch per thread | mid, deliberately dissonant |
 | Live threads | MXBean | occasional pentatonic notes | mid-high, pleasant when healthy |
 | Heap not recovering | derived | slow dissonant swell | a collection that reclaimed almost nothing |
+| Threads stuck | MXBean + JFR | breath pad, filtered noise swelling | low-mid, the sound of waiting |
 | Parked threads | JFR | **nothing** — drawn only | a parked thread is usually just idle |
 
-Two deliberate choices. Contention **suppresses** the pentatonic melody, so the pleasant layer
-falls away exactly when things go wrong. And a `DynamicsCompressor` sits on the master bus, so a
-contention storm landing on top of a kick does not clip into mush — which matters most in a
-recorded clip.
+Three deliberate choices. Contention **suppresses** the pentatonic melody, so the pleasant layer
+falls away exactly when things go wrong. A `DynamicsCompressor` sits on the master bus, so a
+contention storm landing on top of a kick does not clip into mush. And the drone **ducks** by 45%
+for about 200ms whenever a collection or a contention event fires, because a continuous bed that
+never gets out of the way masks the very events it is meant to sit beneath.
+
+The breath pad is what makes a stalled application audible at all. A pool that has run dry, a
+slow third-party API or an event loop held by a blocking call allocate nothing, collect nothing
+and contend over nothing. Without a voice for waiting they are simply silent, which is the one
+thing a monitor must never be. It responds to the *rise* above the resting level of waiting
+threads, so an idle pool does not hum.
 
 **Record clip** captures the canvas and the audio into a single WebM through
 `canvas.captureStream()` and a `MediaStreamAudioDestinationNode`. Verified output: 1980×706 at
@@ -228,6 +236,70 @@ storm, leak, recovery — with on-screen narration. Press **Record clip** first 
 reel.
 
 The reactive path can be run by hand with `mvn -Pwebflux spring-boot:run` in `sonify-demo`.
+
+---
+
+## Real-world scenarios
+
+Sixteen pathologies that genuinely happen to production applications, reproduced against real
+PostgreSQL, real Redis and a real third-party API running as its own process. Nothing is
+simulated with sleeps: the Hikari pool really runs dry, the N+1 really issues one query per row,
+and the upstream really holds the socket open.
+
+```bash
+brew services start postgresql@16 && brew services start redis
+java -cp sonify-scenarios/target/classes net.bitsar.sonify.scenarios.upstream.UpstreamServer 8090
+java -Xmx512m -jar sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar              # Tomcat, :8080
+java -Xmx512m -jar sonify-demo-reactive/target/sonify-demo-reactive-0.1.0-SNAPSHOT.jar  # Netty, :8081
+```
+
+```bash
+./sonify-demo/scripts/scenarios.sh list
+./sonify-demo/scripts/scenarios.sh run db-n-plus-one 50 30
+./sonify-demo/scripts/scenarios.sh compare conc-thread-per-request 60 20
+./sonify-demo/scripts/scenarios.sh all
+```
+
+| Category | Scenarios |
+| --- | --- |
+| Database and pool | pool exhaustion, N+1 queries, unbounded result set, connection leak |
+| Third-party API | slow upstream, retry storm, missing read timeout, oversized payload |
+| Redis and caching | healthy hit path, cache stampede, cold cache, unbounded local cache |
+| Concurrency model | thread-per-request, blocking the event loop, correct offloading, lock convoy |
+
+### Drive load from outside when the server is the subject
+
+`scenarios.sh run` drives a scenario from threads inside the application, which is convenient and
+enough for anything whose signature is about the JVM itself. It never touches the Tomcat worker
+pool or the Netty event loops, so it cannot show either of them filling up. For those, use
+`http` or `compare`, which drive real connections from a separate process.
+
+### What blocking the event loop actually costs
+
+Identical work, 60 concurrent users, measured with the external driver on an 8-core machine:
+
+| | throughput | p50 | p99 |
+| --- | --- | --- | --- |
+| Tomcat, thread per request | 191.6 req/s | 309ms | 394ms |
+| Netty, `block()` on the event loop | **24.9 req/s** | 2200ms | 4466ms |
+| Netty, offloaded to `boundedElastic` | 189.5 req/s | 308ms | 399ms |
+
+Throughput did not merely degrade, it collapsed to the number of event loops. Eight loops each
+serving one 300ms call at a time is about 26 requests a second, and 24.9 is what was measured.
+The thread count stays perfectly flat throughout, which is what makes this failure so hard to
+recognise from a dashboard: nothing grows to show the damage.
+
+### Seeing a thread that is stuck
+
+Two readings exist for waiting because Flight Recorder reports a wait only when it *ends*. A
+drained connection pool or a client with no read timeout emits nothing at all while every thread
+sits stuck, so an event-driven view shows an idle application. The thread bean is asked directly
+instead, every tick, for how many threads are BLOCKED or WAITING at this instant.
+
+The difference is not academic. Before this, a connection leak reported five parked threads; now
+it reports sixty-five stuck against a resting level of twenty-five. The two states also separate
+the pathologies cleanly: a lock convoy shows BLOCKED climbing with waiting flat, while pool
+exhaustion shows the opposite.
 
 ---
 

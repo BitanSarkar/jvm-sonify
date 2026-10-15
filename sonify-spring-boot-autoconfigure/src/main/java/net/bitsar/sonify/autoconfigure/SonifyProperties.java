@@ -102,6 +102,7 @@ public class SonifyProperties {
                 .tick(tick)
                 .contentionThreshold(events.getContentionThreshold())
                 .parkThreshold(events.getParkThreshold())
+                .ioWaitThreshold(events.getIoWaitThreshold())
                 .allocationWindow(events.getAllocationWindow())
                 .bufferCapacity(bufferCapacity)
                 .maxClients(maxClients)
@@ -123,6 +124,20 @@ public class SonifyProperties {
         private Duration parkThreshold = Duration.ofMillis(20);
 
         /**
+         * Only report socket reads that blocked a thread for at least this long.
+         *
+         * <p>Lower than the other thresholds on purpose. A query against a nearby database
+         * returns in well under a millisecond, so a 20ms floor reports nothing at all; what
+         * makes an N+1 slow is the number of reads, not the length of any one of them. Five
+         * milliseconds catches a genuinely slow read while ignoring the ordinary fast ones.
+         *
+         * <p>Note that this only sees blocking socket I/O, which is what JDBC drivers and
+         * classic HTTP clients use. A non-blocking client such as java.net.http parks its
+         * calling thread on a future instead, so its waiting shows up in the parked count.
+         */
+        private Duration ioWaitThreshold = Duration.ofMillis(5);
+
+        /**
          * Window over which the allocation rate is averaged. Flight Recorder and the allocation
          * counters both move in steps, so a window of a second or more gives a stable figure.
          */
@@ -142,6 +157,14 @@ public class SonifyProperties {
 
         public void setParkThreshold(Duration parkThreshold) {
             this.parkThreshold = parkThreshold;
+        }
+
+        public Duration getIoWaitThreshold() {
+            return ioWaitThreshold;
+        }
+
+        public void setIoWaitThreshold(Duration ioWaitThreshold) {
+            this.ioWaitThreshold = ioWaitThreshold;
         }
 
         public Duration getAllocationWindow() {

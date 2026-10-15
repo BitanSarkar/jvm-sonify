@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Collects the Flight Recorder observations that only JFR can provide: which threads blocked on a
- * monitor, and which parked, for longer than their configured thresholds.
+ * monitor, which parked, and which sat in a socket read waiting for something on the network.
  *
  * <p>Allocation is deliberately not collected here. It comes from the platform thread bean
  * instead, exactly rather than by sampling; see {@link AllocationSampler}.
@@ -37,6 +37,14 @@ public final class MetricsAccumulator {
         }
     }
 
+    /** A thread that spent longer than the threshold blocked in a socket read. */
+    public void recordIoWait(String threadName) {
+        Blocking tracked = track(threadName);
+        if (tracked != null) {
+            tracked.ioWaits.increment();
+        }
+    }
+
     private Blocking track(String threadName) {
         String name = threadName == null || threadName.isEmpty() ? "unknown" : threadName;
         Blocking existing = blockingByThread.get(name);
@@ -54,10 +62,12 @@ public final class MetricsAccumulator {
         Map<String, Counts> counts = new LinkedHashMap<>();
         int contended = 0;
         int parked = 0;
+        int waiting = 0;
         for (Map.Entry<String, Blocking> entry : blockingByThread.entrySet()) {
             int blocks = entry.getValue().blocks.intValue();
             int parks = entry.getValue().parks.intValue();
-            if (blocks == 0 && parks == 0) {
+            int ioWaits = entry.getValue().ioWaits.intValue();
+            if (blocks == 0 && parks == 0 && ioWaits == 0) {
                 continue;
             }
             if (blocks > 0) {
@@ -66,28 +76,34 @@ public final class MetricsAccumulator {
             if (parks > 0) {
                 parked++;
             }
-            counts.put(entry.getKey(), new Counts(blocks, parks));
+            if (ioWaits > 0) {
+                waiting++;
+            }
+            counts.put(entry.getKey(), new Counts(blocks, parks, ioWaits));
         }
         blockingByThread.clear();
-        return new Snapshot(contended, parked, Map.copyOf(counts));
+        return new Snapshot(contended, parked, waiting, Map.copyOf(counts));
     }
 
     /**
      * One drained window.
      *
-     * <p>{@code contendedThreads} and {@code parkedThreads} count distinct threads rather than
-     * events: "three threads were contended" says more about an application's health than "three
-     * monitor-enter events fired".
+     * <p>Counts are of distinct threads rather than events: "three threads were contended" says
+     * more about an application's health than "three monitor-enter events fired".
      */
-    public record Snapshot(int contendedThreads, int parkedThreads, Map<String, Counts> byThread) {
+    public record Snapshot(int contendedThreads,
+                           int parkedThreads,
+                           int ioWaitThreads,
+                           Map<String, Counts> byThread) {
     }
 
-    /** How often one thread blocked or parked during a window. */
-    public record Counts(int blocks, int parks) {
+    /** How often one thread blocked, parked or waited on the network during a window. */
+    public record Counts(int blocks, int parks, int ioWaits) {
     }
 
     private static final class Blocking {
         private final LongAdder blocks = new LongAdder();
         private final LongAdder parks = new LongAdder();
+        private final LongAdder ioWaits = new LongAdder();
     }
 }

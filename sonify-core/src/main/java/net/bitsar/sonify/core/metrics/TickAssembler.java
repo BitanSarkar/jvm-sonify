@@ -67,6 +67,9 @@ public final class TickAssembler {
                 reading.threadCount(),
                 window.contendedThreads(),
                 window.parkedThreads(),
+                window.ioWaitThreads(),
+                reading.blockedThreads(),
+                reading.waitingThreads(),
                 rankThreads(allocated.bytesByThread(), window.byThread()));
     }
 
@@ -85,19 +88,29 @@ public final class TickAssembler {
             MetricsAccumulator.Counts counts = blockingByThread.get(name);
             int blocks = counts == null ? 0 : counts.blocks();
             int parks = counts == null ? 0 : counts.parks();
-            slices.add(new ThreadSlice(name, stateOf(blocks, parks), allocBytes, blocks, parks));
+            int ioWaits = counts == null ? 0 : counts.ioWaits();
+            slices.add(new ThreadSlice(name, stateOf(blocks, parks, ioWaits), allocBytes, blocks, parks, ioWaits));
         }
 
         slices.sort(Comparator
-                .comparingInt((ThreadSlice slice) -> slice.blocks() > 0 ? 0 : 1)
+                .comparingInt((ThreadSlice slice) -> slice.blocks() > 0 ? 0 : slice.ioWaits() > 0 ? 1 : 2)
                 .thenComparing(slice -> -slice.allocBytes())
                 .thenComparing(ThreadSlice::name));
         return slices.size() > maxThreadSlices ? List.copyOf(slices.subList(0, maxThreadSlices)) : slices;
     }
 
-    private static String stateOf(int blocks, int parks) {
+    /**
+     * Contention first, then waiting on the network, then parking.
+     *
+     * <p>A thread in a socket read is a request that cannot finish, while a parked thread is
+     * usually a pool thread with nothing to do, so waiting outranks parking.
+     */
+    private static String stateOf(int blocks, int parks, int ioWaits) {
         if (blocks > 0) {
             return ThreadSlice.CONTENDED;
+        }
+        if (ioWaits > 0) {
+            return ThreadSlice.WAITING;
         }
         return parks > 0 ? ThreadSlice.PARKED : ThreadSlice.RUNNING;
     }

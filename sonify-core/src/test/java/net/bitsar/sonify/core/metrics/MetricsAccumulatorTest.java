@@ -34,7 +34,7 @@ class MetricsAccumulatorTest {
 
         Map<String, MetricsAccumulator.Counts> byThread = accumulator.drain().byThread();
 
-        assertEquals(new MetricsAccumulator.Counts(2, 1), byThread.get("worker-1"));
+        assertEquals(new MetricsAccumulator.Counts(2, 1, 0), byThread.get("worker-1"));
     }
 
     @Test
@@ -72,6 +72,20 @@ class MetricsAccumulatorTest {
 
         assertTrue(accumulator.drain().byThread().size() <= 256,
                 "expected the tracked-thread cap to hold");
+    }
+
+    @Test
+    @DisplayName("waiting on a socket is counted separately from parking")
+    void ioWaitIsItsOwnCount() {
+        accumulator.recordIoWait("http-nio-8080-exec-1");
+        accumulator.recordPark("pool-idle-1");
+
+        MetricsAccumulator.Snapshot window = accumulator.drain();
+
+        assertEquals(1, window.ioWaitThreads());
+        assertEquals(1, window.parkedThreads());
+        assertEquals(0, window.contendedThreads());
+        assertEquals(new MetricsAccumulator.Counts(0, 0, 1), window.byThread().get("http-nio-8080-exec-1"));
     }
 
     @Test

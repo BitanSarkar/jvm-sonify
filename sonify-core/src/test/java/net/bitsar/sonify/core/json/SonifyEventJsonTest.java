@@ -16,34 +16,34 @@ class SonifyEventJsonTest {
     @DisplayName("a tick serialises to the documented wire format")
     void tick() {
         TickEvent tick = new TickEvent(1734567890123L, 512000000L, 1073741824L, 2147483648L,
-                220.4d, 0.37d, 0.5d, 42, 3, 7, List.of());
+                220.4d, 0.37d, 0.5d, 42, 3, 7, 4, 2, 9, List.of());
 
         assertEquals("{\"type\":\"tick\",\"t\":1734567890123,\"heapUsed\":512000000,"
                 + "\"heapCommitted\":1073741824,\"heapMax\":2147483648,\"allocMBps\":220.4,"
-                + "\"cpu\":0.37,\"machineCpu\":0.5,\"threads\":42,\"contended\":3,\"parked\":7,"
+                + "\"cpu\":0.37,\"machineCpu\":0.5,\"threads\":42,\"contended\":3,\"parked\":7,\"ioWait\":4,\"blocked\":2,\"waiting\":9,"
                 + "\"threadDetail\":[]}", SonifyEventJson.toJson(tick));
     }
 
     @Test
     @DisplayName("an unavailable CPU reading is null, never a misleading zero")
     void unavailableCpuIsNull() {
-        TickEvent tick = new TickEvent(1L, 0L, 0L, 0L, 0d, null, null, 1, 0, 0, List.of());
+        TickEvent tick = new TickEvent(1L, 0L, 0L, 0L, 0d, null, null, 1, 0, 0, 0, 0, 0, List.of());
 
         assertEquals("{\"type\":\"tick\",\"t\":1,\"heapUsed\":0,\"heapCommitted\":0,\"heapMax\":0,"
                 + "\"allocMBps\":0,\"cpu\":null,\"machineCpu\":null,\"threads\":1,\"contended\":0,"
-                + "\"parked\":0,\"threadDetail\":[]}", SonifyEventJson.toJson(tick));
+                + "\"parked\":0,\"ioWait\":0,\"blocked\":0,\"waiting\":0,\"threadDetail\":[]}", SonifyEventJson.toJson(tick));
     }
 
     @Test
     @DisplayName("thread detail carries each thread's state and activity")
     void threadDetail() {
-        TickEvent tick = new TickEvent(1L, 0L, 0L, 0L, 0d, null, null, 2, 1, 0,
-                List.of(new ThreadSlice("worker-1", ThreadSlice.CONTENDED, 4194304L, 2, 0)));
+        TickEvent tick = new TickEvent(1L, 0L, 0L, 0L, 0d, null, null, 2, 1, 0, 0, 0, 0,
+                List.of(new ThreadSlice("worker-1", ThreadSlice.CONTENDED, 4194304L, 2, 0, 0)));
 
         assertEquals("{\"type\":\"tick\",\"t\":1,\"heapUsed\":0,\"heapCommitted\":0,\"heapMax\":0,"
                 + "\"allocMBps\":0,\"cpu\":null,\"machineCpu\":null,\"threads\":2,\"contended\":1,"
-                + "\"parked\":0,\"threadDetail\":[{\"name\":\"worker-1\",\"state\":\"contended\","
-                + "\"allocBytes\":4194304,\"blocks\":2,\"parks\":0}]}", SonifyEventJson.toJson(tick));
+                + "\"parked\":0,\"ioWait\":0,\"blocked\":0,\"waiting\":0,\"threadDetail\":[{\"name\":\"worker-1\",\"state\":\"contended\","
+                + "\"allocBytes\":4194304,\"blocks\":2,\"parks\":0,\"io\":0}]}", SonifyEventJson.toJson(tick));
     }
 
     @Test

@@ -30,6 +30,17 @@ class JvmVitalsTest {
     }
 
     @Test
+    @DisplayName("thread states are counted at this instant, not when a wait finishes")
+    void countsThreadStates() {
+        JvmVitals.Sample sample = new JvmVitals().sample();
+
+        assertTrue(sample.blockedThreads() >= 0);
+        assertTrue(sample.waitingThreads() > 0,
+                "a running JVM always has some threads parked or waiting");
+        assertTrue(sample.blockedThreads() + sample.waitingThreads() <= sample.threadCount());
+    }
+
+    @Test
     @DisplayName("CPU load is either a ratio in 0..1 or null, never a bogus number")
     void cpuIsRatioOrNull() {
         JvmVitals.Sample sample = new JvmVitals().sample();

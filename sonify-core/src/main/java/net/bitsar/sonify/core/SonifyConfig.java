@@ -11,6 +11,7 @@ import java.time.Duration;
 public record SonifyConfig(Duration tick,
                            Duration contentionThreshold,
                            Duration parkThreshold,
+                           Duration ioWaitThreshold,
                            Duration allocationWindow,
                            int bufferCapacity,
                            int maxClients,
@@ -51,6 +52,7 @@ public record SonifyConfig(Duration tick,
         private Duration tick = Duration.ofMillis(100);
         private Duration contentionThreshold = Duration.ofMillis(10);
         private Duration parkThreshold = Duration.ofMillis(20);
+        private Duration ioWaitThreshold = Duration.ofMillis(5);
         private Duration allocationWindow = Duration.ofSeconds(2);
         private int bufferCapacity = 512;
         private int maxClients = 8;
@@ -74,6 +76,11 @@ public record SonifyConfig(Duration tick,
 
         public Builder parkThreshold(Duration value) {
             this.parkThreshold = value;
+            return this;
+        }
+
+        public Builder ioWaitThreshold(Duration value) {
+            this.ioWaitThreshold = value;
             return this;
         }
 
@@ -113,7 +120,7 @@ public record SonifyConfig(Duration tick,
         }
 
         public SonifyConfig build() {
-            return new SonifyConfig(tick, contentionThreshold, parkThreshold, allocationWindow, bufferCapacity, maxClients, maxThreadSlices, gracePeriod,
+            return new SonifyConfig(tick, contentionThreshold, parkThreshold, ioWaitThreshold, allocationWindow, bufferCapacity, maxClients, maxThreadSlices, gracePeriod,
                     executionSampleEnabled, executionSamplePeriod);
         }
     }

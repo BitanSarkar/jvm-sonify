@@ -29,6 +29,7 @@ window.SonifyViz = (function () {
         alloc: style.getPropertyValue('--alloc').trim(),
         gc: style.getPropertyValue('--gc').trim(),
         running: style.getPropertyValue('--running').trim(),
+        waiting: style.getPropertyValue('--waiting').trim(),
         contended: style.getPropertyValue('--contended').trim(),
         parked: style.getPropertyValue('--parked').trim(),
         label: style.getPropertyValue('--fg').trim()
@@ -234,7 +235,7 @@ window.SonifyViz = (function () {
         index.set(row.name, position);
       });
 
-      var buckets = { running: [], contended: [], parked: [] };
+      var buckets = { running: [], contended: [], waiting: [], parked: [] };
       ticks.forEach(function (tick) {
         if (!tick.threadDetail) {
           return;
@@ -258,7 +259,7 @@ window.SonifyViz = (function () {
           return;
         }
         ctx.fillStyle = colors[stateName];
-        var size = stateName === 'contended' ? 3 : 2;
+        var size = (stateName === 'contended' || stateName === 'waiting') ? 3 : 2;
         for (var i = 0; i < points.length; i += 2) {
           ctx.fillRect(points[i] - size / 2, points[i + 1] - size / 2, size, size);
         }
@@ -267,7 +268,7 @@ window.SonifyViz = (function () {
       ctx.font = '9px ui-monospace, Menlo, monospace';
       ctx.textAlign = 'left';
       rows.forEach(function (row, position) {
-        ctx.fillStyle = row.contended ? colors.contended : colors.axis;
+        ctx.fillStyle = row.contended ? colors.contended : row.waiting ? colors.waiting : colors.axis;
         var label = row.name.length > 22 ? row.name.slice(0, 21) + '…' : row.name;
         ctx.fillText(label, 4, lane.top + 17 + position * rowHeight);
       });

@@ -18,6 +18,7 @@ class SonifyConfigTest {
         assertEquals(Duration.ofMillis(100), config.tick());
         assertEquals(Duration.ofMillis(10), config.contentionThreshold());
         assertEquals(Duration.ofMillis(20), config.parkThreshold());
+        assertEquals(Duration.ofMillis(5), config.ioWaitThreshold());
         assertEquals(Duration.ofSeconds(2), config.allocationWindow());
         assertEquals(512, config.bufferCapacity());
         assertEquals(8, config.maxClients());

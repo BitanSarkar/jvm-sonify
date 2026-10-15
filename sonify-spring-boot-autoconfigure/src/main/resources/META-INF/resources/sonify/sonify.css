@@ -14,6 +14,7 @@
   --gc: #7c4dc4;
   --running: #15919b;
   --contended: #d93025;
+  --waiting: #c98a00;
   --parked: #9aa0a6;
 
   --ok: #0f8a4f;
@@ -36,6 +37,7 @@
     --gc: #a983f0;
     --running: #2ad4c1;
     --contended: #ff6b5e;
+    --waiting: #ffc95c;
     --parked: #6b7280;
 
     --ok: #3ddc84;
@@ -145,6 +147,7 @@ body {
 }
 
 .stat__value--bad { color: var(--bad); }
+.stat__value--waiting { color: var(--waiting); }
 
 /* ---- timeline ---- */
 
@@ -220,6 +223,7 @@ body {
 .swatch--alloc { background: var(--alloc); }
 .swatch--running { background: var(--running); border-radius: 50%; }
 .swatch--contended { background: var(--contended); border-radius: 50%; }
+.swatch--waiting { background: var(--waiting); border-radius: 50%; }
 .swatch--parked { background: var(--parked); border-radius: 50%; }
 
 @media (max-width: 640px) {

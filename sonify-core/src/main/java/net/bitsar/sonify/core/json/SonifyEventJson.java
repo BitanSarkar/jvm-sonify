@@ -51,6 +51,9 @@ public final class SonifyEventJson {
         out.append(",\"threads\":").append(tick.threads());
         out.append(",\"contended\":").append(tick.contended());
         out.append(",\"parked\":").append(tick.parked());
+        out.append(",\"ioWait\":").append(tick.ioWait());
+        out.append(",\"blocked\":").append(tick.blocked());
+        out.append(",\"waiting\":").append(tick.waiting());
         appendThreadSlices(out, tick.threadSlices());
     }
 
@@ -68,6 +71,7 @@ public final class SonifyEventJson {
             out.append(",\"allocBytes\":").append(slice.allocBytes());
             out.append(",\"blocks\":").append(slice.blocks());
             out.append(",\"parks\":").append(slice.parks());
+            out.append(",\"io\":").append(slice.ioWaits());
             out.append('}');
         }
         out.append(']');
