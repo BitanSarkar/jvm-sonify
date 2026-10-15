@@ -8,11 +8,73 @@
 </head>
 <body>
   <header class="bar">
-    <h1>JVM Sonify</h1>
-    <span id="state" class="state state--connecting">connecting</span>
+    <h1 class="bar__title">JVM Sonify</h1>
+    <span id="state" class="pill pill--connecting">connecting</span>
+    <div class="bar__controls">
+      <button id="play" class="button" type="button">Play sound</button>
+      <button id="mute" class="button" type="button">Mute</button>
+      <label class="volume">
+        <span class="volume__label">vol</span>
+        <input id="volume" class="volume__slider" type="range" min="0" max="100" value="70"
+               aria-label="Volume">
+      </label>
+      <button id="record" class="button" type="button">Record clip</button>
+    </div>
   </header>
-  <p class="stats" id="stats">waiting for the first tick&hellip;</p>
-  <pre id="log" class="log"></pre>
+
+  <section class="stats" aria-label="Live vitals">
+    <div class="stat">
+      <span class="stat__label">heap</span>
+      <span class="stat__value" id="stat-heap">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">heap used</span>
+      <span class="stat__value" id="stat-heap-pct">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">allocation</span>
+      <span class="stat__value" id="stat-alloc">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">cpu (jvm)</span>
+      <span class="stat__value" id="stat-cpu">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">cpu (machine)</span>
+      <span class="stat__value" id="stat-machine">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">threads</span>
+      <span class="stat__value" id="stat-threads">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">contended</span>
+      <span class="stat__value" id="stat-contended">&mdash;</span>
+    </div>
+    <div class="stat">
+      <span class="stat__label">parked</span>
+      <span class="stat__value" id="stat-parked">&mdash;</span>
+    </div>
+  </section>
+
+  <main class="timeline">
+    <canvas id="timeline" class="timeline__canvas"></canvas>
+  </main>
+
+  <section class="log" id="log" aria-label="Recent collections and contention" aria-live="polite"></section>
+
+  <footer class="legend">
+    <span><i class="swatch swatch--heap"></i>heap used</span>
+    <span><i class="swatch swatch--committed"></i>committed</span>
+    <span><i class="swatch swatch--gc"></i>collection</span>
+    <span><i class="swatch swatch--alloc"></i>allocation</span>
+    <span><i class="swatch swatch--running"></i>running</span>
+    <span><i class="swatch swatch--contended"></i>contended</span>
+    <span><i class="swatch swatch--parked"></i>parked</span>
+  </footer>
+
+  <script src="viz.js"></script>
+  <script src="audio.js"></script>
   <script src="sonify.js"></script>
 </body>
 </html>
