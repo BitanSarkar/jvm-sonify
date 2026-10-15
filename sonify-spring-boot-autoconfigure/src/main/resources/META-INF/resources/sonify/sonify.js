@@ -47,14 +47,6 @@
     return value >= 1024 ? (value / 1024).toFixed(2) + ' GB' : value.toFixed(0) + ' MB';
   }
 
-  function compactPair(usedBytes, totalBytes) {
-    var total = mb(totalBytes);
-    if (total >= 1024) {
-      return (mb(usedBytes) / 1024).toFixed(2) + ' / ' + (total / 1024).toFixed(2) + ' GB';
-    }
-    return Math.round(mb(usedBytes)) + ' / ' + Math.round(total) + ' MB';
-  }
-
   function formatPercent(ratio) {
     return ratio === null || ratio === undefined ? '--' : Math.round(ratio * 100) + '%';
   }
@@ -186,8 +178,9 @@
   function renderStats(tick) {
     var ceiling = tick.heapMax > 0 ? tick.heapMax : tick.heapCommitted;
     var occupancy = ceiling > 0 ? tick.heapUsed / ceiling : 0;
-    // One unit, not two: "244 MB / 512 MB" wrapped the tile onto a second line.
-    el.statHeap.textContent = compactPair(tick.heapUsed, ceiling);
+    // Just the used figure: "438 / 512 MB" wrapped the tile, and the next tile already
+    // carries the percentage while the canvas shows the full scale.
+    el.statHeap.textContent = formatMb(tick.heapUsed);
     el.statHeapPct.textContent = formatPercent(occupancy);
     el.statAlloc.textContent = formatRate(tick.allocMBps);
     el.statCpu.textContent = formatPercent(tick.cpu);
