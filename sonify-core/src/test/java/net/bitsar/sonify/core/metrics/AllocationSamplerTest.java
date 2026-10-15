@@ -17,6 +17,16 @@ class AllocationSamplerTest {
     /** Thread id to its allocated-bytes counter, as the fake bean will report them. */
     private final Map<Long, Long> live = new LinkedHashMap<>();
 
+    /** What the fake bean's exact JVM-wide counter should return. */
+    private final java.util.concurrent.atomic.AtomicLong exactTotal =
+            new java.util.concurrent.atomic.AtomicLong(-1L);
+
+    private java.lang.invoke.MethodHandle exactTotalHandle() throws Throwable {
+        return java.lang.invoke.MethodHandles.publicLookup().findVirtual(
+                com.sun.management.ThreadMXBean.class, "getTotalThreadAllocatedBytes",
+                java.lang.invoke.MethodType.methodType(long.class));
+    }
+
     @Test
     @DisplayName("the first sighting of a thread is a baseline, not a spike")
     void firstSightingIsBaselined() {
@@ -95,9 +105,70 @@ class AllocationSamplerTest {
     }
 
     @Test
+    @DisplayName("the exact JVM-wide counter is preferred over summing live threads")
+    void prefersExactTotal() throws Throwable {
+        live.put(1L, 10 * MB);
+        exactTotal.set(999 * MB);
+
+        AllocationSampler sampler = new AllocationSampler(fakeBean(), exactTotalHandle());
+
+        assertTrue(sampler.exact());
+        assertEquals(999 * MB, sampler.sample().cumulativeBytes(),
+                "summing live threads would have said 10MB and missed every short-lived thread");
+    }
+
+    @Test
+    @DisplayName("an exact counter that fails falls back to summing rather than reporting nothing")
+    void fallsBackWhenExactCounterFails() throws Throwable {
+        live.put(1L, 10 * MB);
+        exactTotal.set(-1L);
+
+        AllocationSampler sampler = new AllocationSampler(fakeBean(), exactTotalHandle());
+
+        assertEquals(10 * MB, sampler.sample().cumulativeBytes());
+    }
+
+    @Test
+    @DisplayName("an older JDK without the exact counter still reports a total")
+    void olderJdkUsesFallback() {
+        live.put(1L, 10 * MB);
+
+        AllocationSampler sampler = new AllocationSampler(fakeBean(), null);
+
+        assertFalse(sampler.exact());
+        assertEquals(10 * MB, sampler.sample().cumulativeBytes());
+    }
+
+    @Test
+    @DisplayName("a thread that lives and dies inside one tick is still counted when exact")
+    void shortLivedThreadIsCountedWhenExact() throws Exception {
+        AllocationSampler sampler = new AllocationSampler();
+        if (!sampler.exact()) {
+            return;
+        }
+        long before = sampler.sample().cumulativeBytes();
+
+        // Allocates 64MB and exits well within one tick, so no sample ever observes it alive.
+        Thread burst = new Thread(() -> {
+            java.util.List<byte[]> sink = new java.util.ArrayList<>();
+            for (int index = 0; index < 64; index++) {
+                sink.add(new byte[(int) MB]);
+            }
+            sink.clear();
+        }, "burst");
+        burst.start();
+        burst.join();
+
+        long measured = sampler.sample().cumulativeBytes() - before;
+
+        assertTrue(measured >= 64 * MB,
+                "a thread that died between samples must still be counted, measured " + measured);
+    }
+
+    @Test
     @DisplayName("a JVM that cannot report allocation says so instead of reporting zero bytes")
     void unsupportedJvm() {
-        AllocationSampler sampler = new AllocationSampler(null);
+        AllocationSampler sampler = new AllocationSampler(null, null);
 
         AllocationSampler.Sample sample = sampler.sample();
 
@@ -116,7 +187,7 @@ class AllocationSamplerTest {
                     throw new UnsupportedOperationException("no");
                 });
 
-        assertFalse(new AllocationSampler(broken).sample().supported());
+        assertFalse(new AllocationSampler(broken, null).sample().supported());
     }
 
     @Test
@@ -144,7 +215,8 @@ class AllocationSamplerTest {
     }
 
     private AllocationSampler sampler() {
-        return new AllocationSampler(fakeBean());
+        // null handle: exercise the summing fallback explicitly, whatever JDK the tests run on.
+        return new AllocationSampler(fakeBean(), null);
     }
 
     /** Only the three counter methods are used; getThreadInfo returning null yields "thread-N". */
@@ -163,6 +235,13 @@ class AllocationSamplerTest {
                         yield bytes;
                     }
                     case "getThreadInfo" -> null;
+                    case "getTotalThreadAllocatedBytes" -> {
+                        long total = exactTotal.get();
+                        if (total < 0) {
+                            throw new UnsupportedOperationException("no exact counter");
+                        }
+                        yield total;
+                    }
                     case "isThreadAllocatedMemorySupported", "isThreadAllocatedMemoryEnabled" -> true;
                     default -> throw new UnsupportedOperationException(method.getName());
                 });

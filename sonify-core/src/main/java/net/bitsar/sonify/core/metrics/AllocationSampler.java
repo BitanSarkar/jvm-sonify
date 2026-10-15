@@ -1,5 +1,8 @@
 package net.bitsar.sonify.core.metrics;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.util.HashMap;
@@ -15,10 +18,15 @@ import java.util.Map;
  * microseconds per tick, and dropping the JFR subscription removes what was by far the
  * highest-volume event.
  *
- * <p>The JVM-wide total is accumulated here rather than taken from
- * {@code getTotalThreadAllocatedBytes()}, which only exists from Java 21 and would break the
- * Java 17 baseline. Summing the live threads and carrying forward the final count of every thread
- * that has since died gives the same monotonic total on Java 17.
+ * <p>The JVM-wide total prefers {@code getTotalThreadAllocatedBytes()}, which the JVM maintains
+ * internally and is therefore exact. It is called through a method handle because it only exists
+ * from Java 21 and this library compiles against 17.
+ *
+ * <p>Where it is missing, the total falls back to summing the live threads and carrying forward
+ * the last count of every thread that has since died. That fallback cannot see a thread that was
+ * born and died inside a single tick, and such threads are common: a request handler allocating
+ * 150MB can finish in 15 milliseconds and never appear in a sample at all. The fallback therefore
+ * under-reports bursty allocation, which is why the exact counter is used whenever it exists.
  *
  * <p>Not thread safe: one instance belongs to one tick thread.
  */
@@ -27,6 +35,7 @@ public final class AllocationSampler {
     private static final int MAX_TRACKED_THREADS = 512;
 
     private final com.sun.management.ThreadMXBean threads;
+    private final MethodHandle exactTotal;
     private final Map<Long, Long> previousBytesByThreadId = new HashMap<>();
     private final Map<Long, String> namesByThreadId = new HashMap<>();
 
@@ -37,7 +46,29 @@ public final class AllocationSampler {
     }
 
     AllocationSampler(com.sun.management.ThreadMXBean threads) {
+        this(threads, resolveExactTotal());
+    }
+
+    AllocationSampler(com.sun.management.ThreadMXBean threads, MethodHandle exactTotal) {
         this.threads = threads;
+        this.exactTotal = exactTotal;
+    }
+
+    /** Looks up Java 21's exact JVM-wide counter, or null on an older JDK. */
+    private static MethodHandle resolveExactTotal() {
+        try {
+            return MethodHandles.publicLookup().findVirtual(com.sun.management.ThreadMXBean.class,
+                    "getTotalThreadAllocatedBytes", MethodType.methodType(long.class));
+        } catch (NoSuchMethodException | IllegalAccessException notOnThisJdk) {
+            return null;
+        } catch (Throwable denied) {
+            return null;
+        }
+    }
+
+    /** True when this JVM reports allocation exactly, including threads that lived briefly. */
+    public boolean exact() {
+        return threads != null && exactTotal != null;
     }
 
     private static com.sun.management.ThreadMXBean resolveThreadBean() {
@@ -105,7 +136,18 @@ public final class AllocationSampler {
         previousBytesByThreadId.putAll(current);
         namesByThreadId.keySet().retainAll(current.keySet());
 
-        return new Sample(true, retiredBytes + liveBytes, deltas);
+        return new Sample(true, totalBytes(retiredBytes + liveBytes), deltas);
+    }
+
+    private long totalBytes(long summedFallback) {
+        if (exactTotal == null) {
+            return summedFallback;
+        }
+        try {
+            return (long) exactTotal.invokeExact(threads);
+        } catch (Throwable unavailable) {
+            return summedFallback;
+        }
     }
 
     private String nameOf(long id) {

@@ -1,0 +1,49 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1c1e;
+  --muted: #5c6066;
+  --line: #d8dade;
+  --ok: #0f9d58;
+  --warn: #e8710a;
+  --bad: #d93025;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --fg: #e6e8ea;
+    --muted: #9aa0a6;
+    --line: #2c2f33;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.bar { display: flex; align-items: center; gap: 12px; }
+.bar h1 { font-size: 16px; margin: 0; font-weight: 600; }
+
+.state { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.state--live { color: var(--ok); border-color: var(--ok); }
+.state--connecting { color: var(--warn); border-color: var(--warn); }
+.state--down { color: var(--bad); border-color: var(--bad); }
+
+.stats { color: var(--muted); font-variant-numeric: tabular-nums; margin: 12px 0; }
+
+.log {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 60vh;
+  overflow: auto;
+  font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+}
