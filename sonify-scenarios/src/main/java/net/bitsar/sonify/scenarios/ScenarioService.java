@@ -83,9 +83,9 @@ public class ScenarioService {
         units.put("cache-unbounded-keys", userId -> quotes.quoteFor(anOrder()));
 
         // --- the concurrency model ------------------------------------------------------------
-        units.put("conc-thread-per-request", userId -> shipping.quote());
-        units.put("conc-block-event-loop", userId -> shipping.quote());
-        units.put("conc-offload-elastic", userId -> shipping.quote());
+        units.put("conc-thread-per-request", userId -> shipping.quoteFast());
+        units.put("conc-block-event-loop", userId -> shipping.quoteFast());
+        units.put("conc-offload-elastic", userId -> shipping.quoteFast());
         units.put("conc-shared-lock", userId -> invoices.formatInvoiceDate(anOrder()));
 
         // --- the export path --------------------------------------------------------------------

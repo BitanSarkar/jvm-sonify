@@ -24,6 +24,21 @@ public class ShippingClient {
         this.baseUrl = baseUrl;
     }
 
+    /**
+     * A quote at the dependency's ordinary latency.
+     *
+     * <p>Used by the concurrency-model scenarios, where the subject is the server rather than
+     * the dependency. Three hundred milliseconds is a realistic third-party call and keeps the
+     * comparison legible: eight event loops serving one of these at a time is about twenty-six
+     * requests a second, against roughly two hundred for a thread-per-request container. At the
+     * degraded five-second latency the same comparison is 1.6 against 40, every request times
+     * out, and the run takes minutes to recover from.
+     */
+    public String quoteFast() {
+        String body = restTemplate.getForObject(baseUrl + "/slow?ms=300", String.class);
+        return body == null ? "{}" : body;
+    }
+
     /** A dependency that has become slow, called by a client whose timeout is far too generous. */
     public String quote() {
         String body = restTemplate.getForObject(baseUrl + "/slow?ms=5000", String.class);
