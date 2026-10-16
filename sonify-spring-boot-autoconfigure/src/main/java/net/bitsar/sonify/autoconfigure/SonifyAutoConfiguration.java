@@ -40,7 +40,7 @@ public class SonifyAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnWebApplication
-    public SonifyUiController sonifyUiController() {
-        return new SonifyUiController();
+    public SonifyUiController sonifyUiController(SonifyProperties properties) {
+        return new SonifyUiController(properties.getBasePath());
     }
 }

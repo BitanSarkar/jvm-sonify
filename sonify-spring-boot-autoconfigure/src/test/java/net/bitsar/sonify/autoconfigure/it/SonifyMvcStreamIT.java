@@ -57,6 +57,20 @@ class SonifyMvcStreamIT {
 
     @Test
     @Timeout(60)
+    @DisplayName("the base path without a trailing slash redirects, so relative URLs resolve")
+    void redirectsToTheSlashForm() {
+        // The page requests its stream as "stream". Without the slash that resolves to /stream
+        // rather than /sonify/stream, and the page loads but never connects.
+        WebTestClient.bindToServer()
+                .baseUrl("http://localhost:" + port)
+                .build()
+                .get().uri("/sonify").exchange()
+                .expectStatus().isFound()
+                .expectHeader().location("/sonify/");
+    }
+
+    @Test
+    @Timeout(60)
     @DisplayName("a file that is not part of the UI cannot be read through the base path")
     void refusesUnknownAssets() {
         WebTestClient.bindToServer().baseUrl("http://localhost:" + port).build()

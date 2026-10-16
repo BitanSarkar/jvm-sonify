@@ -57,6 +57,7 @@ public class SonifyMvcController implements DisposableBean {
         return emitter;
     }
 
+    @SuppressWarnings("null")
     @ExceptionHandler(SonifyCapacityException.class)
     public ResponseEntity<String> tooManyClients(SonifyCapacityException full) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
@@ -64,6 +65,7 @@ public class SonifyMvcController implements DisposableBean {
                 .body(full.getMessage());
     }
 
+    @SuppressWarnings("null")
     private void pump(Subscription subscription, SseEmitter emitter) {
         try {
             while (!Thread.currentThread().isInterrupted()) {

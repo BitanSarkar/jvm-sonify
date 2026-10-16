@@ -1,9 +1,12 @@
 package net.bitsar.sonify.autoconfigure;
 
+import java.net.URI;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +32,25 @@ public class SonifyUiController {
             "viz.js", MediaType.valueOf("text/javascript"),
             "audio.js", MediaType.valueOf("text/javascript"));
 
+    private final String basePath;
+
+    public SonifyUiController(@Value("${sonify.base-path:/sonify}") String basePath) {
+        this.basePath = basePath;
+    }
+
+    /**
+     * Redirects to the trailing-slash form rather than serving the page here.
+     *
+     * <p>The page asks for its stream with the relative URL "stream". Served at {@code /sonify/}
+     * that resolves to {@code /sonify/stream}; served at {@code /sonify} it resolves to
+     * {@code /stream}, which does not exist. The page would load and then sit disconnected
+     * forever, so the slash is made certain before any of its scripts run.
+     */
     @GetMapping("${sonify.base-path:/sonify}")
     public ResponseEntity<Resource> index() {
-        return asset("index.html");
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(basePath + "/"))
+                .build();
     }
 
     @GetMapping("${sonify.base-path:/sonify}/")
