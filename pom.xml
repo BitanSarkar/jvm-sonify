@@ -17,6 +17,15 @@
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <maven.compiler.release>17</maven.compiler.release>
     <spring-boot.version>3.5.16</spring-boot.version>
+
+    <!--
+      Where build output goes. The default is the conventional location, so a fresh clone
+      behaves exactly as expected. Override it when the working copy lives inside a synced
+      folder such as iCloud, Dropbox or OneDrive: those services write conflict duplicates
+      into target/ ("SonifyDemoApplication 2.class"), which makes a build fail with errors
+      that look like code faults. See .mvn/maven.config.example.
+    -->
+    <sonify.build.directory>${project.basedir}/target</sonify.build.directory>
   </properties>
 
   <modules>
@@ -61,6 +70,8 @@
   </dependencyManagement>
 
   <build>
+    <directory>${sonify.build.directory}</directory>
+
     <pluginManagement>
       <plugins>
         <plugin>

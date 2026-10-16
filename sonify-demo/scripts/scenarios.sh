@@ -17,7 +17,10 @@ MVC="${MVC_URL:-http://localhost:8080}"
 REACTIVE="${REACTIVE_URL:-http://localhost:8081}"
 UPSTREAM="${UPSTREAM_URL:-http://localhost:8090}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DRIVER_CP="$ROOT_DIR/sonify-scenarios/target/classes"
+SONIFY_ROOT="$ROOT_DIR"
+# shellcheck source=_paths.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_paths.sh"
+DRIVER_CP="$(sonify_classes sonify-scenarios 2>/dev/null || echo "$ROOT_DIR/sonify-scenarios/target/classes")"
 FORMAT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_format.py"
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
@@ -35,9 +38,7 @@ check() {
     || { echo "  demo       NOT reachable  ($MVC)"; failed=1; }
   if [ $failed -eq 1 ]; then
     echo
-    echo "  upstream: java -cp $DRIVER_CP net.bitsar.sonify.scenarios.upstream.UpstreamServer 8090"
-    echo "  demo    : java -Xmx512m -jar sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar"
-    echo "  reactive: java -Xmx512m -jar sonify-demo-reactive/target/sonify-demo-reactive-0.1.0-SNAPSHOT.jar"
+    sonify_start_hints
     exit 1
   fi
 }

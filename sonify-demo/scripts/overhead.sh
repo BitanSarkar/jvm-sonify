@@ -12,7 +12,10 @@
 #   ./overhead.sh [path-to-jar] [trials-per-condition]
 set -u
 
-JAR="${1:-sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar}"
+SONIFY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=_paths.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_paths.sh"
+JAR="${1:-$(sonify_jar sonify-demo 2>/dev/null)}"
 TRIALS="${2:-5}"
 PORT=8099
 BASE="http://localhost:$PORT"

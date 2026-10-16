@@ -1,0 +1,4 @@
+# Copy to .mvn/maven.config to move build output out of a synced folder.
+# Maven reads that file automatically, so no flags are needed on the command line.
+# Each module gets its own directory because ${project.artifactId} is interpolated.
+-Dsonify.build.directory=${user.home}/.sonify-build/${project.artifactId}

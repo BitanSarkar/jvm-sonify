@@ -265,6 +265,24 @@ Do not rebuild while an application is running: Spring Boot's nested-jar loader 
 lazily, and replacing the jar underneath produces `ClassNotFoundException` for classes that are
 plainly present.
 
+### Building inside a synced folder
+
+iCloud, Dropbox and OneDrive all write conflict duplicates into build output when two machines,
+or one machine and the sync daemon, touch it at once. In this project that produced seventy-one
+files such as `SonifyDemoApplication 2.class` inside `target/`, and a build that failed with
+`Unable to find main class` — an error that looks like a code fault and is not.
+
+`mvn clean` clears it, but it recurs. To stop it, move build output out of the synced folder:
+
+```bash
+cp .mvn/maven.config.example .mvn/maven.config
+```
+
+Maven reads that file automatically, so no flags are needed afterwards. Output then lands in
+`~/.sonify-build/<module>/` instead of `<module>/target/`. The file is gitignored, the default
+stays conventional for anyone cloning, and the scripts check both locations, so nothing else
+changes.
+
 ---
 
 ## Licence

@@ -1,4 +1,8 @@
 target/
+target.nosync/
+# Machine-specific: copied from .mvn/maven.config.example when the
+# working copy lives in a synced folder.
+.mvn/maven.config
 *.class
 *.jar
 *.war

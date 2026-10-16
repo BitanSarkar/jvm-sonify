@@ -28,7 +28,9 @@ countdown() {
 
 if ! curl -sf -o /dev/null "$BASE/actuator/health"; then
   echo "Cannot reach $BASE - start the demo first:" >&2
-  echo "  java -Xmx512m -jar sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar" >&2
+  SONIFY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_paths.sh"
+  echo "  java -Xmx512m -jar $(sonify_jar sonify-demo 2>/dev/null || echo sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar)" >&2
   exit 1
 fi
 

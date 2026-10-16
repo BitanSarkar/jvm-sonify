@@ -26,6 +26,10 @@ java -Xmx512m -jar sonify-demo/target/sonify-demo-0.1.0-SNAPSHOT.jar
 java -Xmx512m -jar sonify-demo-reactive/target/sonify-demo-reactive-0.1.0-SNAPSHOT.jar
 ```
 
+If the build output has been moved out of a synced folder (see the root README), the jars are
+under `~/.sonify-build/<module>/` rather than `<module>/target/`. `scenarios.sh` checks both and
+prints the right commands for your machine when a prerequisite is missing.
+
 Then open <http://localhost:8080/sonify/>, press **Play sound**, and:
 
 | command | what it does |
