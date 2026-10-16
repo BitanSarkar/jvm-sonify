@@ -149,6 +149,86 @@ body {
 .stat__value--bad { color: var(--bad); }
 .stat__value--waiting { color: var(--waiting); }
 
+/* ---- what you are hearing ---- */
+
+.voices {
+  margin: 12px 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.voices__title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.voices__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 4px 18px;
+}
+
+.voice {
+  display: grid;
+  grid-template-columns: 108px 72px 1fr;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 0;
+  transition: opacity 120ms linear;
+}
+
+.voice--idle { opacity: 0.38; }
+
+.voice__name {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.voice__meter {
+  /* Both of these are spans, and an inline element ignores width and height entirely, so the
+     level bar rendered at zero pixels however wide it was told to be. */
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--grid);
+  overflow: hidden;
+}
+
+.voice__level {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--running);
+  transition: width 70ms linear;
+}
+
+.voice__detail {
+  font: 10.5px/1.3 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voices__hint { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
+
+.voice--drone      .voice__level { background: var(--heap); }
+.voice--breath     .voice__level { background: var(--waiting); }
+.voice--hat        .voice__level { background: var(--alloc); }
+.voice--kick       .voice__level { background: var(--gc); }
+.voice--alarm      .voice__level { background: var(--bad); }
+.voice--contention .voice__level { background: var(--contended); }
+.voice--melody     .voice__level { background: var(--running); }
+.voice--leak       .voice__level { background: var(--bad); }
+
 /* ---- timeline ---- */
 
 .timeline {
@@ -230,4 +310,5 @@ body {
   .log__row { grid-template-columns: 62px 1fr; }
   .log__detail { grid-column: 1 / -1; }
   .bar__controls { margin-left: 0; width: 100%; }
+  .voice { grid-template-columns: 96px 54px 1fr; }
 }

@@ -135,6 +135,14 @@ and contend over nothing. Without a voice for waiting they are simply silent, wh
 thing a monitor must never be. It responds to the *rise* above the resting level of waiting
 threads, so an idle pool does not hum.
 
+### Reading the sound
+
+Eight voices layered together tell you that *something* is happening without telling you what.
+A panel above the timeline gives a meter per voice that lights as it sounds, with the reading
+that caused it beside it, so the mix can be read rather than guessed at: the drone's current
+pitch and heap percentage, the hi-hat's allocation rate, the name of the thread that just
+blocked, and which voices are silent. The drone's meter visibly dips when it ducks.
+
 **Record clip** captures the canvas and the audio into a single WebM through
 `canvas.captureStream()` and a `MediaStreamAudioDestinationNode`. Verified output: 1980×706 at
 30fps VP9 video plus an Opus audio track.

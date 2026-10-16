@@ -45,6 +45,10 @@ window.SonifyAudio = (function () {
   // Waiting threads are counted against this before the pad reaches full depth.
   var BREATH_FULL_SCALE = 24;
   var BREATH_MAX_GAIN = 0.16;
+
+  // How long each transient voice stays lit on the meter after it fires. Long enough to read,
+  // short enough that the panel still tracks what is happening now.
+  var DECAY_MS = { kick: 420, alarm: 900, contention: 500, hat: 160, melody: 700, leak: 1600 };
   var SCHEDULE_AHEAD = 0.12;
   var SCHEDULER_MS = 25;
 
@@ -73,11 +77,32 @@ window.SonifyAudio = (function () {
     var nextHatTime = 0;
     var nextNoteTime = 0;
     var threadPitch = new Map();
+    // When each transient voice last fired, and how hard, so the meter can show what is
+     // actually making the noise at any moment.
+    var fired = {};
     var muted = false;
     var volume = 0.7;
 
     // Latest readings, written by the stream and read by the scheduler.
     var vitals = { heapRatio: 0, allocMBps: 0, cpu: 0, threads: 1, contended: 0, waiting: 0 };
+
+    function fire(voice, strength, detail) {
+      fired[voice] = { at: Date.now(), strength: Math.max(0.05, Math.min(1, strength)), detail: detail };
+    }
+
+    function decayed(voice) {
+      var last = fired[voice];
+      if (!last) {
+        return 0;
+      }
+      var age = Date.now() - last.at;
+      var span = DECAY_MS[voice] || 400;
+      return age >= span ? 0 : last.strength * (1 - age / span);
+    }
+
+    function detailOf(voice) {
+      return fired[voice] ? fired[voice].detail : '';
+    }
 
     function running() {
       return ctx !== null && ctx.state === 'running';
@@ -320,6 +345,7 @@ window.SonifyAudio = (function () {
       envelope.connect(hatBus);
       source.start(when);
       source.stop(when + 0.05);
+      fire('hat', gain, vitals.allocMBps.toFixed(0) + ' MB/s');
     }
 
     function note(when, hz, gain, length) {
@@ -336,6 +362,7 @@ window.SonifyAudio = (function () {
       envelope.connect(voiceBus);
       osc.start(when);
       osc.stop(when + length + 0.02);
+      fire('melody', 0.8, vitals.threads + ' threads, nothing contended');
     }
 
     /** A collection: the heartbeat. Longer pauses hit harder and ring longer. */
@@ -363,9 +390,11 @@ window.SonifyAudio = (function () {
       osc.start(when);
       osc.stop(when + length + 0.02);
       duck(when, DUCK_DEPTH * weight, length + 0.15);
+      fire('kick', 0.3 + weight * 0.7, event.name + ' ' + event.pauseMs.toFixed(1) + 'ms');
 
       if (pause > LONG_GC_MS) {
         alarm(when, Math.min(1, pause / 400));
+        fire('alarm', Math.min(1, pause / 400), 'pause ' + event.pauseMs.toFixed(0) + 'ms');
       }
     }
 
@@ -429,6 +458,8 @@ window.SonifyAudio = (function () {
         osc.stop(when + length + 0.02);
       });
       duck(when, DUCK_DEPTH, length + 0.1);
+      fire('contention', 0.4 + weight * 0.6,
+          event.thread + ' blocked ' + event.durationMs.toFixed(0) + 'ms');
     }
 
     /** A collection that reclaimed almost nothing while the heap is high: the leak sound. */
@@ -458,6 +489,7 @@ window.SonifyAudio = (function () {
         osc.start(when);
         osc.stop(when + 1.25);
       });
+      fire('leak', severity, 'collection reclaimed almost nothing');
     }
 
     function setMuted(value) {
@@ -489,6 +521,39 @@ window.SonifyAudio = (function () {
       }
     }
 
+    /**
+     * What every voice is doing right now, so the page can show a key to what is being heard.
+     *
+     * <p>Continuous voices report their actual gain, which means the drone visibly dips when it
+     * ducks. Transient voices report a level that decays from the moment they fired, so the
+     * meter shows which one just made a noise rather than only that something did.
+     */
+    function voices() {
+      var droneLevel = droneGain ? droneGain.gain.value / DRONE_GAIN : 0;
+      var breathLevel = breathGain ? breathGain.gain.value / BREATH_MAX_GAIN : 0;
+      return [
+        { id: 'drone', label: 'heap drone', level: running() ? Math.min(1, droneLevel) : 0,
+          detail: drone ? Math.round(drone.frequency.value) + ' Hz' : '',
+          reading: Math.round(vitals.heapRatio * 100) + '% of heap' },
+        { id: 'breath', label: 'breath pad', level: Math.min(1, breathLevel),
+          detail: breathLevel > 0.02 ? 'swelling' : 'silent',
+          reading: Math.round(vitals.waiting) + ' threads stuck' },
+        { id: 'hat', label: 'hi-hat', level: decayed('hat'),
+          detail: detailOf('hat'), reading: 'allocation rate' },
+        { id: 'kick', label: 'gc kick', level: decayed('kick'),
+          detail: detailOf('kick'), reading: 'collection pause' },
+        { id: 'alarm', label: 'long gc alarm', level: decayed('alarm'),
+          detail: detailOf('alarm') || 'silent', reading: 'pause over 100ms' },
+        { id: 'contention', label: 'contention', level: decayed('contention'),
+          detail: detailOf('contention') || 'silent', reading: 'blocked on a monitor' },
+        { id: 'melody', label: 'healthy melody', level: decayed('melody'),
+          detail: vitals.contended > 0 ? 'suppressed by contention' : detailOf('melody'),
+          reading: 'plays when nothing is contended' },
+        { id: 'leak', label: 'leak swell', level: decayed('leak'),
+          detail: detailOf('leak') || 'silent', reading: 'gc that reclaimed nothing' }
+      ];
+    }
+
     /** Exposed so the page can report what the engine is actually doing. */
     function describe() {
       return {
@@ -518,6 +583,7 @@ window.SonifyAudio = (function () {
       gc: gc,
       contention: contention,
       leak: leak,
+      voices: voices,
       setMuted: setMuted,
       setVolume: setVolume,
       stream: stream,

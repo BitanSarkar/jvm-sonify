@@ -27,6 +27,7 @@
   var recordedChunks = [];
   var counters = { ticks: 0, gc: 0, contention: 0 };
   var parkedHistory = [];
+  var voiceRows = null;
 
   var el = {};
 
@@ -225,6 +226,8 @@
     var stuck = Math.round(tick.waitingLevel || 0);
     el.statIoWait.textContent = stuck;
     el.statIoWait.className = 'stat__value' + (stuck > 0 ? ' stat__value--waiting' : '');
+    el.statBlocked.textContent = tick.blocked === undefined ? '--' : tick.blocked;
+    el.statBlocked.className = 'stat__value' + (tick.blocked > 0 ? ' stat__value--bad' : '');
     el.statParked.textContent = tick.parked;
   }
 
@@ -353,8 +356,61 @@
     });
   }
 
+  /**
+   * The key to what is being heard.
+   *
+   * <p>Hearing that something is happening is not the same as knowing what, and with eight
+   * voices layered the mix alone does not say which one just fired. Each voice gets a meter
+   * that lights as it sounds and a line saying what drove it, so the sound can be read.
+   */
+  function renderVoices() {
+    var voices = audio.voices();
+    if (!voiceRows) {
+      voiceRows = {};
+      voices.forEach(function (voice) {
+        var row = document.createElement('div');
+        row.className = 'voice voice--' + voice.id;
+
+        var name = document.createElement('span');
+        name.className = 'voice__name';
+        name.textContent = voice.label;
+
+        var meter = document.createElement('span');
+        meter.className = 'voice__meter';
+        var level = document.createElement('span');
+        level.className = 'voice__level';
+        meter.appendChild(level);
+
+        var detail = document.createElement('span');
+        detail.className = 'voice__detail';
+
+        row.appendChild(name);
+        row.appendChild(meter);
+        row.appendChild(detail);
+        el.voicesGrid.appendChild(row);
+        voiceRows[voice.id] = { row: row, level: level, detail: detail };
+      });
+    }
+
+    voices.forEach(function (voice) {
+      var row = voiceRows[voice.id];
+      row.level.style.width = Math.round(voice.level * 100) + '%';
+      row.detail.textContent = voice.detail ? voice.detail : voice.reading;
+      var idle = voice.level < 0.02;
+      if (idle !== row.idle) {
+        row.idle = idle;
+        row.row.classList.toggle('voice--idle', idle);
+      }
+    });
+
+    el.voicesHint.textContent = audio.running()
+      ? 'Each bar lights as that voice sounds. The line beside it is what caused it.'
+      : 'Press Play sound to start the engine. The meters stay dark until it is running.';
+  }
+
   function frame() {
     viz.draw();
+    renderVoices();
     window.requestAnimationFrame(frame);
   }
 
@@ -375,7 +431,10 @@
       statThreads: byId('stat-threads'),
       statContended: byId('stat-contended'),
       statIoWait: byId('stat-iowait'),
-      statParked: byId('stat-parked')
+      statBlocked: byId('stat-blocked'),
+      statParked: byId('stat-parked'),
+      voicesGrid: byId('voices-grid'),
+      voicesHint: byId('voices-hint')
     };
 
     viz = window.SonifyViz.create(el.canvas, state);

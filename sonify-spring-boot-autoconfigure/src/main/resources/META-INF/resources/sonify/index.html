@@ -52,6 +52,10 @@
       <span class="stat__value" id="stat-contended">&mdash;</span>
     </div>
     <div class="stat">
+      <span class="stat__label">blocked now</span>
+      <span class="stat__value" id="stat-blocked">&mdash;</span>
+    </div>
+    <div class="stat">
       <span class="stat__label">threads stuck</span>
       <span class="stat__value" id="stat-iowait">&mdash;</span>
     </div>
@@ -59,6 +63,12 @@
       <span class="stat__label">parked</span>
       <span class="stat__value" id="stat-parked">&mdash;</span>
     </div>
+  </section>
+
+  <section class="voices" id="voices" aria-label="What you are hearing">
+    <h2 class="voices__title">What you are hearing</h2>
+    <div class="voices__grid" id="voices-grid"></div>
+    <p class="voices__hint" id="voices-hint">Press <strong>Play sound</strong> to start the engine.</p>
   </section>
 
   <main class="timeline">
