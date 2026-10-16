@@ -396,6 +396,31 @@ properly built starter needs no annotations at all. A library that requires
 
 ---
 
+## 19. A monitor that goes blank while claiming to be live
+
+**What happened.** Running the unbounded-memoiser scenario at thirty users exhausted a 512MB
+heap and the application died with an `OutOfMemoryError`. The monitoring page carried on showing
+a green "live" badge, the last stat values frozen in place, and a completely empty chart.
+
+**Why the page could not tell.** An `EventSource` reports an error when its *connection* breaks.
+Here the socket stayed open; the server simply stopped sending, because the JVM had no heap left
+to run the tick thread in. No error fired, so nothing in the page knew anything was wrong. The
+chart emptied silently as its thirty-second window scrolled past the last data point.
+
+**Why it matters more than the crash.** Three blank lanes under a "live" badge read as a calm
+application. The one moment a monitor most needs to be believed is the moment the thing it
+watches has stopped, and that is precisely when a connection-driven view says nothing.
+
+**The fix.** Track the time of the last tick. If nothing arrives for four seconds while the
+connection is still open, say "no data for Ns" instead of "live", and draw the reason on the
+canvas rather than leaving it empty.
+
+**The lesson.** Liveness is not connectivity. Any streaming UI needs a staleness clock
+independent of its transport, because "the socket is open" and "the data is current" are
+different claims and only one of them is useful.
+
+---
+
 ## What generalises
 
 1. **Cross-check any reading you intend to build on.** Items 1, 4 and 5 were all caught by

@@ -27,6 +27,8 @@
   var recordedChunks = [];
   var counters = { ticks: 0, gc: 0, contention: 0 };
   var parkedHistory = [];
+  var lastTickAt = 0;
+  var STALL_AFTER_MS = 4000;
   var voiceRows = null;
 
   var el = {};
@@ -91,6 +93,7 @@
 
   function onTick(tick) {
     counters.ticks++;
+    lastTickAt = Date.now();
     tick.waitingLevel = waitingLevel(tick);
     state.ticks.push(tick);
     if (state.ticks.length > MAX_TICKS) {
@@ -408,7 +411,28 @@
       : 'Press Play sound to start the engine. The meters stay dark until it is running.';
   }
 
+  /**
+   * Notices when the stream has gone quiet.
+   *
+   * <p>An EventSource whose connection is still open reports no error, so a server that has
+   * stopped sending looks identical to one with nothing to say. That is exactly what happens
+   * when the JVM being measured runs out of heap: the socket stays open, the page keeps saying
+   * live, and the chart silently empties. A monitor claiming to be live over a blank chart is
+   * worse than one that admits it has lost contact.
+   */
+  function checkForStall() {
+    if (!state.connected || !lastTickAt) {
+      return;
+    }
+    var silentFor = Date.now() - lastTickAt;
+    if (silentFor > STALL_AFTER_MS) {
+      setState('down', 'no data for ' + Math.round(silentFor / 1000) + 's');
+      state.connected = true;
+    }
+  }
+
   function frame() {
+    checkForStall();
     viz.draw();
     renderVoices();
     window.requestAnimationFrame(frame);

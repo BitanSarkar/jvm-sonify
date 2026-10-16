@@ -310,6 +310,21 @@ window.SonifyViz = (function () {
       ctx.clearRect(0, 0, width, height);
       drawTimeAxis(now);
 
+      // An empty window means the stream stopped, not that the application is idle. Saying so
+      // beats drawing three blank lanes and letting them be read as calm.
+      if (!ticks.length) {
+        ctx.fillStyle = colors.axis;
+        ctx.font = '13px ui-sans-serif, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('no data in the last ' + (WINDOW_MS / 1000) + ' seconds',
+                width / 2, height / 2 - 8);
+        ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillText('the application being measured may be unresponsive',
+                width / 2, height / 2 + 12);
+        ctx.textAlign = 'left';
+        return;
+      }
+
       var frame = lanes();
       drawHeap(frame.heap, ticks, now);
       drawAlloc(frame.alloc, ticks, now);
