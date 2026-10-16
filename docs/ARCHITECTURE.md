@@ -83,7 +83,7 @@ jvm-sonify
 ├── sonify-core                        the engine. Pure Java, ZERO dependencies.
 ├── sonify-spring-boot-autoconfigure   wiring, HTTP transports, the browser UI
 ├── sonify-spring-boot-starter         thin pom, the single dependency you add
-├── sonify-scenarios                   real production pathologies, transport agnostic
+├── sonify-scenarios                   an ordinary Spring app that degrades, transport agnostic
 ├── sonify-demo                        Tomcat application, port 8080
 └── sonify-demo-reactive               Netty application, port 8081
 ```

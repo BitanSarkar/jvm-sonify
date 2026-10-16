@@ -43,8 +43,9 @@ def main():
         print()
 
     elif mode == "ids":
-        # api-no-timeout holds request threads until the upstream gives up, so anything after
-        # it would be measuring a saturated server rather than itself. It goes last.
+        # These leave the JVM saturated afterwards: the join-fetch trap loads forty thousand
+        # orders into memory, and the generous timeout holds request threads for thirty seconds.
+        # Anything following them would measure the recovery rather than itself.
         # These leave the JVM saturated for a while afterwards, so anything following them
         # would measure the recovery rather than itself.
         last = {"api-timeout-too-generous", "db-fetch-join-paginated"}

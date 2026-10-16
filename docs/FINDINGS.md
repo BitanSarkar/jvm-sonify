@@ -347,6 +347,55 @@ fault that reads as correct in the DOM.
 
 ---
 
+## 17. The obvious fix for an N+1 is far worse than the N+1
+
+**The assumption.** An N+1 is fixed with a fetch join. `@EntityGraph(attributePaths = "lines")`
+on a paginated query gives you the page in two queries instead of a hundred and one.
+
+**The measurement.** Three implementations of one listing page, all returning identical results,
+driven at 20 users for 10 seconds:
+
+| strategy | single call | under load |
+| --- | --- | --- |
+| two queries, by identifier | **33ms** | **1936 req/s**, p50 8ms |
+| lazy association (the N+1) | 71ms | 337 req/s, p50 58ms |
+| fetch join with pagination | 585ms | **~0 req/s**, p50 35s |
+
+**Why.** A collection join multiplies rows, so the database cannot apply `LIMIT` without losing
+lines. Hibernate therefore fetches *every* matching row and paginates in memory. Asking for a
+hundred orders loaded forty thousand orders and two hundred thousand lines.
+
+**The fix that works** is two queries: one for the page of identifiers, which the database can
+limit because nothing is joined, and one for exactly those orders with their lines.
+
+**The lesson.** The fix looked more correct than the bug and was hundreds of times slower. It was
+only caught by running it under load — a unit test asserting the right rows come back passes for
+all three.
+
+---
+
+## 18. Spring has four discovery mechanisms, and component scanning is only one
+
+Startup failed with `No qualifying bean of type OrderRepository`, in a module whose services were
+being found correctly by `@ComponentScan`.
+
+| What | Found by | Defaults to |
+| --- | --- | --- |
+| `@Component`, `@Service`, `@RestController` | `@ComponentScan` | the application's package |
+| `@Entity` | **`@EntityScan`** | the application's package |
+| `Repository` interfaces | **`@EnableJpaRepositories`** | the application's package |
+| library configuration | **`AutoConfiguration.imports`** | package-independent |
+
+Component scanning found the services and nothing else, because entities and repositories are
+discovered separately. All three of the scanning mechanisms default to the main application's own
+package, so any code in a different package tree needs each one declared.
+
+Only the fourth is package-independent, which is exactly why libraries use it: a consumer of a
+properly built starter needs no annotations at all. A library that requires
+`@ComponentScan("com.vendor.thing")` forces every consumer to know its internal package names.
+
+---
+
 ## What generalises
 
 1. **Cross-check any reading you intend to build on.** Items 1, 4 and 5 were all caught by
@@ -357,5 +406,7 @@ fault that reads as correct in the DOM.
    of the work.
 4. **An impossible benchmark result is about your harness**, and an effect smaller than your noise
    deserves a bound rather than a number.
-5. **Say what you did not verify.** Cross-platform behaviour, the sound design and real production
+5. **A fix is not a fix until it is measured under load.** Item 17 looked more correct than the
+   bug and was hundreds of times slower.
+6. **Say what you did not verify.** Cross-platform behaviour, the sound design and real production
    load are all untested here, and the documentation says so.
