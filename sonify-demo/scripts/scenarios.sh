@@ -42,6 +42,23 @@ check() {
   fi
 }
 
+# A scenario can leave the server with no free request threads. Waiting for it to answer again
+# beats running the next one against a saturated application and reporting nonsense.
+wait_ready() {
+  local base="${1:-$MVC}" waited=0
+  until curl -sf -o /dev/null -m 3 "$base/actuator/health"; do
+    waited=$((waited + 3))
+    if [ $waited -ge 120 ]; then
+      echo "  $base did not recover after ${waited}s; it is probably still saturated." >&2
+      return 1
+    fi
+    printf '\r  waiting for %s to answer (%ds)' "$base" "$waited"
+    sleep 3
+  done
+  [ $waited -gt 0 ] && printf '\r  %s answering again after %ds        \n' "$base" "$waited"
+  return 0
+}
+
 list() {
   curl -s "$MVC/scenario" | python3 "$FORMAT" list
 }
@@ -82,10 +99,12 @@ all() {
   curl -s -o /dev/null "$MVC/scenario/warm"
   for id in $(curl -s "$MVC/scenario" | python3 "$FORMAT" ids); do
     bold "$id"
+    wait_ready "$MVC" || { dim "  skipping, server not answering"; continue; }
     run_in_jvm "$id" "$users" "$seconds"
-    curl -s "$MVC/scenario/reset" | sed 's/^/    reset: /'
-    dim "  settling for 8s"
+    curl -s -m 30 "$MVC/scenario/reset" | sed 's/^/    reset: /'
+    dim "  settling"
     sleep 8
+    wait_ready "$MVC" >/dev/null 2>&1 || true
   done
   bold "Reactive-only scenarios"
   dim "  start the reactive app and run: ./scenarios.sh compare conc-thread-per-request"
@@ -93,6 +112,7 @@ all() {
 
 case "${1:-list}" in
   list)     check; list ;;
+  ready)    wait_ready "${2:-$MVC}" && echo "  answering" ;;
   run)      check; run_in_jvm "${2:?scenario id required}" "${3:-50}" "${4:-30}" ;;
   http)     check; run_http "${2:?scenario id required}" "${3:-50}" "${4:-30}" ;;
   reactive) check; run_http "${2:?scenario id required}" "${3:-50}" "${4:-30}" "$REACTIVE" ;;

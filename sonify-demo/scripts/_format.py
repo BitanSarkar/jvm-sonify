@@ -9,9 +9,28 @@ import json
 import sys
 
 
+def micros(value):
+    """Microseconds in whichever unit reads naturally, so nothing rounds away to zero."""
+    if value < 1000:
+        return "{}us".format(value)
+    if value < 100000:
+        return "{:.1f}ms".format(value / 1000.0)
+    return "{:.2f}s".format(value / 1000000.0)
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "list"
-    payload = json.load(sys.stdin)
+    raw = sys.stdin.read().strip()
+    if not raw:
+        print("    (no response: the application did not answer. It may still be saturated by")
+        print("     the previous scenario; see 'scenarios.sh ready'.)")
+        return
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        print("    (unexpected response, not JSON):")
+        print("    " + raw[:300])
+        return
 
     if mode == "list":
         category = None
@@ -24,9 +43,14 @@ def main():
         print()
 
     elif mode == "ids":
-        for row in payload:
-            if row["transport"] != "REACTIVE":
-                print(row["id"])
+        # api-no-timeout holds request threads until the upstream gives up, so anything after
+        # it would be measuring a saturated server rather than itself. It goes last.
+        last = {"api-no-timeout"}
+        runnable = [row["id"] for row in payload if row["transport"] != "REACTIVE"]
+        for scenario_id in [i for i in runnable if i not in last]:
+            print(scenario_id)
+        for scenario_id in [i for i in runnable if i in last]:
+            print(scenario_id)
 
     elif mode == "describe":
         wanted = sys.argv[2]
@@ -41,8 +65,9 @@ def main():
     elif mode == "outcome":
         print("    {} ok, {} failed, {:.1f}/s".format(
             payload["completed"], payload["failed"], payload["throughputPerSecond"]))
-        print("    p50 {}ms  p95 {}ms  p99 {}ms  max {}ms".format(
-            payload["p50Ms"], payload["p95Ms"], payload["p99Ms"], payload["maxMs"]))
+        print("    p50 {}  p95 {}  p99 {}  max {}".format(
+            micros(payload["p50Micros"]), micros(payload["p95Micros"]),
+            micros(payload["p99Micros"]), micros(payload["maxMicros"])))
         print("    " + payload["note"])
 
 

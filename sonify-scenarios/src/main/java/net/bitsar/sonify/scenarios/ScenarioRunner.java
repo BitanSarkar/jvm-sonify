@@ -52,10 +52,13 @@ public final class ScenarioRunner {
                         } catch (Throwable failure) {
                             failed.incrementAndGet();
                         }
-                        long tookMs = (System.nanoTime() - started) / 1_000_000;
+                        // Microseconds, not milliseconds: a lock convoy whose individual
+                        // acquisitions take sixty microseconds reported p50, p95 and p99 all as
+                        // zero, which said nothing about a queue that was plainly forming.
+                        long tookMicros = (System.nanoTime() - started) / 1_000;
                         int slot = sampleIndex.getAndIncrement();
                         if (slot < MAX_SAMPLES) {
-                            samples[slot] = tookMs;
+                            samples[slot] = tookMicros;
                         }
                     }
                 } catch (InterruptedException interrupted) {
@@ -97,7 +100,7 @@ public final class ScenarioRunner {
                 note(scenario, completed.get(), failed.get(), percentile(sorted, 99)));
         LOG.info("scenario {} with {} users: {} ok, {} failed, {}/s, p99 {}ms",
                 scenario.id(), request.users(), outcome.completed(), outcome.failed(),
-                Math.round(outcome.throughputPerSecond()), outcome.p99Ms());
+                Math.round(outcome.throughputPerSecond()), outcome.p99Micros() / 1000);
         return outcome;
     }
 
@@ -116,7 +119,7 @@ public final class ScenarioRunner {
         if (failed > completed / 10) {
             return "a tenth or more of requests failed outright";
         }
-        if (p99 > 2000) {
+        if (p99 > 2_000_000) {
             return "p99 above two seconds: queueing, not working";
         }
         return "completed cleanly";

@@ -26,8 +26,15 @@ public final class UpstreamServer {
     private static final int DEFAULT_PORT = 8090;
     /** Generous, because the slow and blackhole paths hold a handler thread for their duration. */
     private static final int HANDLER_THREADS = 400;
-    /** Finite so a demo of a missing timeout eventually recovers instead of wedging the machine. */
-    private static final long BLACKHOLE_CAP_MS = 90_000;
+    /**
+     * Finite so a demo of a missing timeout recovers instead of wedging the application.
+     *
+     * <p>Ninety seconds was long enough to starve every scenario that ran after it: the request
+     * threads were still held, so the next scenario measured a saturated server rather than
+     * itself. Twenty-five seconds is still far longer than any sane read timeout and lets the
+     * run continue.
+     */
+    private static final long BLACKHOLE_CAP_MS = 25_000;
 
     private UpstreamServer() {
     }
