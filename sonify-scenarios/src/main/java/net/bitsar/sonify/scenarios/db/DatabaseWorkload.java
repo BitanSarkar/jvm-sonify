@@ -30,6 +30,8 @@ public class DatabaseWorkload {
     /** Bounded so that one careless scenario cannot take the whole demo down with an OOM. */
     private static final int MAX_CONCURRENT_BIG_FETCHES = 4;
     private static final int UNBOUNDED_ROWS = 40_000;
+    /** A perfectly ordinary listing page size, which is what makes the N+1 cost so routine. */
+    private static final int N_PLUS_ONE_PAGE = 100;
 
     private final DataSource dataSource;
     private final Semaphore bigFetches = new Semaphore(MAX_CONCURRENT_BIG_FETCHES);
@@ -62,21 +64,29 @@ public class DatabaseWorkload {
         }
     }
 
-    /** One query for a page of orders, then one more for every order in it. */
+    /**
+     * One query for a page of orders, then one more round trip for every order on it.
+     *
+     * <p>Sized like a real listing page. An earlier version looked up a single customer's
+     * orders, which averaged six rows and so issued seven queries in two milliseconds: too mild
+     * to be the pathology it is named after. A hundred rows on a page is ordinary, and the
+     * hundred and one queries it costs is what makes this the most common performance bug there
+     * is.
+     */
     public void nPlusOne(int userId) throws SQLException {
-        long customerId = 1 + ThreadLocalRandom.current().nextLong(20_000);
+        long offset = ThreadLocalRandom.current().nextLong(1000);
         try (Connection connection = dataSource.getConnection()) {
-            List<Long> orderIds = new ArrayList<>();
+            List<Long> orderIds = new ArrayList<>(N_PLUS_ONE_PAGE);
             try (PreparedStatement statement = connection.prepareStatement(
-                    "SELECT id FROM customer_order WHERE customer_id = ? LIMIT 40")) {
-                statement.setLong(1, customerId);
+                    "SELECT id FROM customer_order ORDER BY id LIMIT " + N_PLUS_ONE_PAGE + " OFFSET ?")) {
+                statement.setLong(1, offset);
                 try (ResultSet rows = statement.executeQuery()) {
                     while (rows.next()) {
                         orderIds.add(rows.getLong(1));
                     }
                 }
             }
-            // The N+1: a separate round trip for every single order.
+            // The N+1 itself: a separate round trip for every single row on the page.
             List<String> descriptions = new ArrayList<>();
             for (Long orderId : orderIds) {
                 try (PreparedStatement statement = connection.prepareStatement(

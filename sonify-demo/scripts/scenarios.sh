@@ -18,6 +18,7 @@ REACTIVE="${REACTIVE_URL:-http://localhost:8081}"
 UPSTREAM="${UPSTREAM_URL:-http://localhost:8090}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DRIVER_CP="$ROOT_DIR/sonify-scenarios/target/classes"
+FORMAT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_format.py"
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 dim()  { printf '\033[2m%s\033[0m\n' "$1"; }
@@ -42,45 +43,18 @@ check() {
 }
 
 list() {
-  curl -s "$MVC/scenario" | python3 -c '
-import sys, json
-rows = json.load(sys.stdin)
-category = None
-for row in rows:
-    if row["category"] != category:
-        category = row["category"]
-        print(f"\n  {category}")
-    tag = "" if row["transport"] == "ANY" else f"  [{row['transport'].lower()} only]"
-    print(f"    {row[\"id\"]:<26} {row[\"name\"]}{tag}")
-'
-  echo
+  curl -s "$MVC/scenario" | python3 "$FORMAT" list
 }
 
 describe() {
-  curl -s "$MVC/scenario" | python3 -c "
-import sys, json
-for row in json.load(sys.stdin):
-    if row['id'] == '$1':
-        print()
-        print('  ' + row['name'])
-        print('  situation : ' + row['situation'])
-        print('  graph     : ' + row['expectedGraph'])
-        print('  sound     : ' + row['expectedSound'])
-"
+  curl -s "$MVC/scenario" | python3 "$FORMAT" describe "$1"
 }
 
 run_in_jvm() {
   local id="$1" users="${2:-50}" seconds="${3:-30}"
   describe "$id"
   dim "  driving from inside the JVM with $users users for ${seconds}s"
-  curl -s "$MVC/scenario/$id/run?users=$users&seconds=$seconds" \
-    | python3 -c '
-import sys, json
-o = json.load(sys.stdin)
-print(f"    {o[\"completed\"]} ok, {o[\"failed\"]} failed, {o[\"throughputPerSecond\"]:.1f}/s")
-print(f"    p50 {o[\"p50Ms\"]}ms  p95 {o[\"p95Ms\"]}ms  p99 {o[\"p99Ms\"]}ms  max {o[\"maxMs\"]}ms")
-print(f"    {o[\"note\"]}")
-'
+  curl -s "$MVC/scenario/$id/run?users=$users&seconds=$seconds" | python3 "$FORMAT" outcome
 }
 
 run_http() {
@@ -106,12 +80,7 @@ compare() {
 all() {
   local users="${1:-50}" seconds="${2:-25}"
   curl -s -o /dev/null "$MVC/scenario/warm"
-  for id in $(curl -s "$MVC/scenario" | python3 -c '
-import sys, json
-for row in json.load(sys.stdin):
-    if row["transport"] != "REACTIVE":
-        print(row["id"])
-'); do
+  for id in $(curl -s "$MVC/scenario" | python3 "$FORMAT" ids); do
     bold "$id"
     run_in_jvm "$id" "$users" "$seconds"
     curl -s "$MVC/scenario/reset" | sed 's/^/    reset: /'
