@@ -14,139 +14,181 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The sixteen scenarios, each a pathology that really happens to real applications.
+ * Scenarios built on ordinary application code.
  *
- * <p>They are chosen to leave distinct signatures. Several are deliberately quiet: a pool that
- * has run dry or an event loop that is blocked produces almost no allocation, no collections and
- * no monitor contention, and that silence is itself the diagnosis.
+ * <p>None of these are broken programs. The repositories are paginated, the transactions are
+ * scoped, the HTTP clients have timeouts and bounded retries with backoff and a circuit breaker,
+ * and the caches have time to live. Every one of them would pass review, and several are the
+ * textbook fix for a different problem.
+ *
+ * <p>They degrade anyway, because resilience against errors is not resilience against latency,
+ * and correctness is not the same as scalability. That is the point: production systems rarely
+ * fail by crashing. They fail by getting slower while every health check stays green.
  */
 public final class ScenarioCatalog {
 
     private static final Map<String, Scenario> BY_ID = new LinkedHashMap<>();
 
     static {
-        // --- database and connection pool ------------------------------------------------
-        add(new Scenario("db-pool-exhaustion", "Connection pool exhaustion", DATABASE,
-                "More concurrent users than the Hikari pool has connections, which is the single "
-                        + "most common way a healthy application falls over under a traffic spike.",
-                "Waiting threads climb and stay climbing while heap, allocation and CPU stay flat. "
-                        + "Throughput plateaus at the pool size no matter how many users arrive.",
-                "The breath pad swells as threads queue for a connection. Almost nothing else moves.",
+        // --- database and persistence ---------------------------------------------------------
+        add(new Scenario("db-n-plus-one", "Lazy association on a listing page", DATABASE,
+                "A paginated, read-only listing that renders each order's lines. The repository "
+                        + "call is one query; the loop that follows is a hundred more, because "
+                        + "touching a lazy collection is a round trip that looks like a field access.",
+                "Allocation climbs and young collections become constant. Throughput falls to a "
+                        + "fraction of the fetch-joined version at identical load.",
+                "The hi-hat races and the kick becomes a drum roll.",
                 ANY));
 
-        add(new Scenario("db-n-plus-one", "N+1 query storm", DATABASE,
-                "An ORM-shaped access pattern: fetch a page of orders, then fetch the lines for "
-                        + "each order one query at a time.",
-                "Allocation climbs hard and young collections become constant. Heap saws rapidly.",
-                "The hi-hat races and the kick turns into a drum roll.",
+        add(new Scenario("db-fetch-join-paginated", "The obvious fix, which is worse", DATABASE,
+                "A join fetch with pagination, which is the first thing anybody reaches for after "
+                        + "being told to fix an N+1. A collection join multiplies rows, so the "
+                        + "database cannot apply the limit, and Hibernate loads every matching "
+                        + "order and every line before taking the first hundred in memory.",
+                "Heap climbs hard and throughput collapses. Measured on this data: a single "
+                        + "request takes 585ms against 33ms for the correct fix, and under twenty "
+                        + "concurrent users throughput falls to effectively zero. It also leaves "
+                        + "the JVM too busy to measure anything else for a while, so it runs last.",
+                "The drone climbs while everything else falls silent. The application has stopped.",
                 ANY));
 
-        add(new Scenario("db-unbounded-result", "Unbounded result set", DATABASE,
-                "A query with no LIMIT that happened to be fine in staging, run against production "
-                        + "data volumes.",
-                "Heap ramps steeply towards the ceiling, old collections appear and reclaim little.",
-                "The drone climbs and the leak swell fires when a collection frees almost nothing.",
+        add(new Scenario("db-n-plus-one-fixed", "The fix that actually works", DATABASE,
+                "One query for the page of identifiers, which the database can limit because "
+                        + "nothing is joined, then one more for exactly those orders with their "
+                        + "lines. Two queries for any page size.",
+                "Measured against the other two on identical load: 1936 requests a second at p50 "
+                        + "8ms, against 337 a second at p50 58ms for the N+1 and effectively zero "
+                        + "for the join fetch. Five to six times the throughput of the bug, and "
+                        + "orders of magnitude better than the obvious fix.",
+                "Noticeably calmer. Run all three back to back; this is the A/B worth hearing.",
                 ANY));
 
-        add(new Scenario("db-connection-leak", "Connection leak", DATABASE,
-                "A code path that forgets to close its connection, so the pool drains slowly until "
-                        + "the application stops being able to talk to the database at all.",
-                "Waiting threads climb gradually rather than suddenly, then throughput falls off a "
-                        + "cliff when the last connection is gone.",
-                "The breath pad builds slowly and never recedes. The healthy melody stops.",
+        add(new Scenario("db-transaction-spans-http", "Transaction held across a gateway call", DATABASE,
+                "A @Transactional checkout that calls the payment gateway while the transaction "
+                        + "is open. The timeout is set, the retries are bounded, the breaker works. "
+                        + "The connection is still pinned for the whole round trip.",
+                "Threads waiting climbs and stays there while CPU and heap sit flat. Throughput "
+                        + "caps at the pool size divided by the gateway's latency, not at anything "
+                        + "about your hardware.",
+                "The breath pad swells and very little else moves.",
                 ANY));
 
-        // --- third-party API ---------------------------------------------------------------
-        add(new Scenario("api-slow-upstream", "Slow upstream on a thread-per-request server", UPSTREAM,
-                "A third-party API that normally answers in 50ms starts taking two seconds, while "
-                        + "traffic stays the same.",
-                "Thread count climbs towards the container maximum and flatlines there. CPU stays "
-                        + "low because the threads are waiting, not working.",
-                "The breath pad rises steadily. Very little else.",
+        add(new Scenario("db-transaction-outside", "The same checkout, transaction narrowed", DATABASE,
+                "The gateway call moved outside the transaction boundary. One line of difference, "
+                        + "and the connection is released before the wait begins.",
+                "Waiting threads still rise, because the gateway is still slow, but the pool stops "
+                        + "being the limit and throughput recovers.",
+                "The pad still swells; the application underneath keeps working.",
+                ANY));
+
+        add(new Scenario("db-export-too-large", "Export sized for staging", DATABASE,
+                "An export that was fine against a staging database and is run against production "
+                        + "volumes. Hibernate holds every row it returns in the persistence context.",
+                "Heap ramps steeply, old collections appear and reclaim progressively less.",
+                "The drone climbs; the leak swell fires when a collection frees almost nothing.",
+                ANY));
+
+        // --- third-party dependencies -----------------------------------------------------------
+        add(new Scenario("api-timeout-too-generous", "A timeout nobody thought hard about", UPSTREAM,
+                "A shipping client with a thirty second read timeout, which is fifty times the "
+                        + "call's real latency. Not a missing timeout, a comfortable round number. "
+                        + "When the vendor degrades to five seconds it cannot fire soon enough to "
+                        + "save the thread pool.",
+                "Thread count climbs towards the container maximum and flatlines. CPU stays low "
+                        + "because nothing is working.",
+                "The breath pad rises steadily.",
                 SERVLET));
 
-        add(new Scenario("api-retry-storm", "Retry storm", UPSTREAM,
-                "An upstream starts failing and the client retries three times with no backoff, so "
-                        + "the failing dependency receives four times the load it already could not handle.",
-                "Allocation and waiting threads step up in multiples as retries pile on.",
-                "The breath pad rises in steps while the hi-hat quickens.",
+        add(new Scenario("api-retry-amplification", "Correct retries, multiplied load", UPSTREAM,
+                "Three bounded attempts with exponential backoff and jitter, exactly as advised, "
+                        + "against a gateway failing seven times in ten. Each user request becomes "
+                        + "up to three upstream requests, so a struggling dependency receives "
+                        + "several times the traffic it already could not serve.",
+                "Waiting threads step up in multiples; the breaker eventually opens and the error "
+                        + "rate falls while latency stays bad.",
+                "The pad rises in steps.",
                 ANY));
 
-        add(new Scenario("api-no-timeout", "Missing read timeout", UPSTREAM,
-                "An HTTP client built without a read timeout, talking to an upstream that accepts "
-                        + "the connection and then never answers.",
-                "Threads enter the wait and never come back. The thread lane only grows.",
-                "The breath pad rises and stays there. Nothing recovers.",
-                SERVLET));
-
-        add(new Scenario("api-huge-payload", "Oversized upstream payload", UPSTREAM,
-                "An upstream that answers with several megabytes of JSON per call, parsed into "
-                        + "objects on every request.",
-                "Allocation spikes hard, heap climbs, and large buffers push G1 into humongous "
-                        + "allocations and old collections.",
-                "Hi-hat races, kicks get heavier, and long pauses trip the alarm.",
+        add(new Scenario("api-breaker-blind-to-slowness", "A circuit breaker that never opens", UPSTREAM,
+                "The same client and the same breaker, against a gateway that is slow rather than "
+                        + "failing. Nothing errors, so the failure counter never rises, so the "
+                        + "breaker stays closed and every thread waits out the full timeout.",
+                "Identical to an outage from the outside: throughput collapses, errors stay at "
+                        + "zero, and every dashboard is green.",
+                "Pure breath pad. The silence is the diagnosis.",
                 ANY));
 
-        // --- redis and caching ---------------------------------------------------------------
-        add(new Scenario("cache-hit-path", "Healthy cache hit path", CACHE,
-                "The system working properly: almost everything served from Redis, the database "
-                        + "barely touched. This is the reference both ears and eyes need.",
-                "Everything flat and low. Steady modest allocation, occasional small collections.",
-                "A calm drone with the pentatonic melody running. This is what healthy sounds like.",
+        add(new Scenario("api-payload-growth", "A response that grew", UPSTREAM,
+                "The vendor added a field and the quote response went from kilobytes to megabytes. "
+                        + "The client is unchanged and still correct.",
+                "Allocation spikes, heap climbs, large buffers push G1 into humongous allocations "
+                        + "and old collections.",
+                "Hi-hat racing, heavy kicks, and the long-pause alarm firing.",
                 ANY));
 
-        add(new Scenario("cache-stampede", "Cache stampede", CACHE,
-                "A hot key expires and every in-flight request recomputes it at once, guarded by a "
-                        + "synchronized block that turns a cache miss into a queue.",
-                "A wall of contention, with threads blocked on one monitor for seconds at a time.",
-                "A dissonant cluster, and the healthy melody cuts out entirely.",
+        // --- caching -------------------------------------------------------------------------------
+        add(new Scenario("cache-healthy", "The cache doing its job", CACHE,
+                "Look aside, fall through on a miss, populate with a time to live. Almost every "
+                        + "request served from Redis. This is the reference both ears and eyes need.",
+                "Everything low and flat.",
+                "A calm drone with the melody running. This is what healthy sounds like.",
                 ANY));
 
-        add(new Scenario("cache-cold", "Cold cache after a deploy", CACHE,
-                "A restart or a flush leaves the cache empty, so every request falls through to the "
-                        + "database until it refills.",
-                "Sustained elevated allocation and pool pressure that slowly subsides as hit rate "
-                        + "recovers. The recovery is the interesting part.",
-                "Busy hi-hat and frequent kicks, easing off as the cache warms.",
+        add(new Scenario("cache-stampede", "A guarded recompute under load", CACHE,
+                "A hot key with a short time to live, recomputed under a lock so the database is "
+                        + "not stampeded. The lock is the recommended fix, and it moves the "
+                        + "stampede from the database onto the application.",
+                "A wall of contention with threads blocked on one monitor for seconds.",
+                "A dissonant cluster, and the melody cuts out.",
                 ANY));
 
-        add(new Scenario("cache-unbounded-local", "Unbounded in-process cache", CACHE,
-                "A local HashMap used as a cache with no eviction and no size limit, keyed by "
-                        + "something unbounded such as a session or a request id.",
+        add(new Scenario("cache-cold-after-deploy", "An empty cache after a restart", CACHE,
+                "Nothing is wrong with the cache; it is simply empty, so every request falls "
+                        + "through until it refills. The first minutes after a deploy.",
+                "Sustained elevated allocation and pool pressure, subsiding as the hit rate climbs. "
+                        + "The recovery is the interesting part.",
+                "Busy, easing off as the cache warms.",
+                ANY));
+
+        add(new Scenario("cache-unbounded-keys", "A memoiser keyed by something unique", CACHE,
+                "A ConcurrentHashMap used to avoid pricing the same request twice. Thread safe, "
+                        + "atomic, reviewed and approved. The key includes a per-request reference, "
+                        + "so no entry is ever reused and nothing is ever evicted.",
                 "Heap climbs steadily and never returns. Collections run more often and reclaim "
-                        + "less each time.",
+                        + "less each time. Days, not minutes, in production.",
                 "The drone climbs and the leak swell fires repeatedly.",
                 ANY));
 
-        // --- concurrency model ------------------------------------------------------------------
-        add(new Scenario("conc-thread-per-request", "Thread-per-request under load", CONCURRENCY,
-                "Blocking I/O on a servlet container: every concurrent request holds a platform "
-                        + "thread for its whole duration. Run this on both servers to compare.",
-                "Thread count tracks concurrency directly and climbs towards the container maximum.",
+        // --- the concurrency model ---------------------------------------------------------------------
+        add(new Scenario("conc-thread-per-request", "Blocking I/O on a servlet container", CONCURRENCY,
+                "Every concurrent request holds a platform thread for its whole duration. Correct, "
+                        + "conventional, and bounded by the container's maximum.",
+                "Thread count tracks concurrency and climbs towards the ceiling.",
                 "The breath pad rises with the waiting threads.",
                 SERVLET));
 
-        add(new Scenario("conc-block-event-loop", "Blocking call on the event loop", CONCURRENCY,
-                "The classic WebFlux mistake: calling block() inside a reactive handler, so the "
-                        + "handful of Netty event loop threads are held by one request each.",
-                "The frightening one. Thread count stays perfectly flat while throughput collapses "
-                        + "to the number of event loops, because nothing grows to show the damage.",
-                "Near silence, with the breath pad barely moving. The absence is the symptom.",
+        add(new Scenario("conc-block-event-loop", "The same call on an event loop", CONCURRENCY,
+                "A blocking client called from a reactive handler. The frightening one: throughput "
+                        + "collapses to the number of event loops while the thread count stays "
+                        + "perfectly flat, so nothing grows to show the damage.",
+                "Everything flat. Throughput pinned to the event loop count.",
+                "Near silence. The absence is the symptom.",
                 REACTIVE));
 
-        add(new Scenario("conc-offload-elastic", "Blocking work offloaded correctly", CONCURRENCY,
-                "The same blocking call, moved onto boundedElastic as it should be, so the event "
-                        + "loops stay free. The counterpart that shows the fix working.",
-                "Event loops stay free and throughput holds up while an elastic pool grows to "
-                        + "absorb the blocking work.",
-                "The breath pad rises but the melody keeps running, because nothing is starved.",
+        add(new Scenario("conc-offload-elastic", "The same call, offloaded properly", CONCURRENCY,
+                "The blocking work moved to boundedElastic so the event loops stay free. The "
+                        + "counterpart that shows the fix working.",
+                "Event loops stay free, an elastic pool absorbs the work, throughput holds.",
+                "The pad rises but the melody keeps running.",
                 REACTIVE));
 
-        add(new Scenario("conc-lock-convoy", "Lock convoy on a hot path", CONCURRENCY,
-                "A synchronized method on a shared object sitting in the request path, which is "
-                        + "fine at low traffic and becomes a queue the moment concurrency rises.",
-                "Sustained contention across many threads, with individual waits running into "
-                        + "seconds because intrinsic locks are not fair.",
+        add(new Scenario("conc-shared-lock", "The textbook fix becoming the bottleneck", CONCURRENCY,
+                "SimpleDateFormat is not thread safe, so the shared instance is guarded by a lock, "
+                        + "which is the fix every guide recommends. It is correct, and it serialises "
+                        + "every request in the application through one monitor.",
+                "Threads BLOCKED climbs while waiting stays flat, which is the mirror image of pool "
+                        + "exhaustion. Individual waits run to seconds because intrinsic locks are "
+                        + "not fair.",
                 "A thick dissonant cluster for as long as the load lasts.",
                 ANY));
     }

@@ -45,7 +45,9 @@ def main():
     elif mode == "ids":
         # api-no-timeout holds request threads until the upstream gives up, so anything after
         # it would be measuring a saturated server rather than itself. It goes last.
-        last = {"api-no-timeout"}
+        # These leave the JVM saturated for a while afterwards, so anything following them
+        # would measure the recovery rather than itself.
+        last = {"api-timeout-too-generous", "db-fetch-join-paginated"}
         runnable = [row["id"] for row in payload if row["transport"] != "REACTIVE"]
         for scenario_id in [i for i in runnable if i not in last]:
             print(scenario_id)
